@@ -189,14 +189,23 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
       .single();
 
     if (error) {
-      console.error('Error creating service:', error);
+      console.error('❌ Error creating service:', error);
       console.error('Error details:', {
         message: error.message,
         details: error.details,
         hint: error.hint,
         code: error.code,
       });
-      return null;
+      console.error('User ID usado:', userId);
+      console.error('Datos del servicio:', {
+        name: service.name,
+        price: service.price,
+        barber_id: service.barber_id,
+        timestamp: service.timestamp,
+      });
+      
+      // Lanzar el error para que el componente pueda manejarlo
+      throw new Error(`Error al guardar servicio: ${error.message}`);
     }
 
     return data;

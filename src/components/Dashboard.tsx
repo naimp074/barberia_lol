@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Scissors, Calendar as CalendarIcon, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import { 
   getServices, 
   saveService, 
@@ -110,20 +111,36 @@ export function Dashboard() {
 
   const addService = async (serviceType: ServiceType) => {
     if (!user) {
-      console.error('No hay usuario autenticado');
+      console.error('❌ No hay usuario autenticado');
+      alert('No hay usuario autenticado. Por favor, inicia sesión nuevamente.');
       return;
     }
 
     if (!selectedBarber) {
-      console.error('No hay barbero seleccionado');
+      console.error('❌ No hay barbero seleccionado');
       alert('Por favor, selecciona un barbero antes de registrar un servicio');
       return;
     }
 
     try {
+      // Verificar autenticación de Supabase
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      if (authError || !authUser) {
+        console.error('❌ Error de autenticación:', authError);
+        alert('Error de autenticación. Por favor, inicia sesión nuevamente.');
+        return;
+      }
+
+      console.log('🔍 Verificación de autenticación:', {
+        'auth.uid()': authUser.id,
+        'user.id del contexto': user.id,
+        'Coinciden': authUser.id === user.id,
+      });
+
       const selectedBarberData = barbers.find((b) => b.id === selectedBarber);
-      console.log('Guardando servicio:', {
+      console.log('💾 Guardando servicio:', {
         user_id: user.id,
+        auth_uid: authUser.id,
         name: serviceType.name,
         price: serviceType.price,
         barber_id: selectedBarber,
@@ -140,7 +157,7 @@ export function Dashboard() {
       });
 
       if (newService) {
-        console.log('Servicio guardado exitosamente:', newService);
+        console.log('✅ Servicio guardado exitosamente:', newService);
         // Actualizar el estado local
         setServices((prev) => [
           {
@@ -153,13 +170,17 @@ export function Dashboard() {
           },
           ...prev,
         ]);
+        // Mostrar mensaje de éxito (opcional)
+        console.log('✅ Servicio registrado correctamente');
       } else {
-        console.error('Error: saveService retornó null');
-        alert('Error al guardar el servicio. Por favor, intenta de nuevo.');
+        console.error('❌ Error: saveService retornó null');
+        alert('Error al guardar el servicio. Por favor, verifica la consola para más detalles.');
       }
-    } catch (error) {
-      console.error('Error adding service:', error);
-      alert('Error al guardar el servicio: ' + (error instanceof Error ? error.message : 'Error desconocido'));
+    } catch (error: any) {
+      console.error('❌ Error adding service:', error);
+      const errorMessage = error?.message || error?.toString() || 'Error desconocido';
+      console.error('Mensaje de error completo:', errorMessage);
+      alert(`Error al guardar el servicio:\n\n${errorMessage}\n\nPor favor, verifica la consola (F12) para más detalles.`);
     }
   };
 
