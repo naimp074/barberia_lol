@@ -295,7 +295,8 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
   
   if (!userExists) {
     console.warn('⚠️ No se pudo crear/verificar usuario en public.users después de múltiples intentos');
-    console.warn('⚠️ Continuando de todas formas - puede que la foreign key apunte a auth.users');
+    console.warn('⚠️ Esto puede causar errores si la foreign key apunta a public.users');
+    console.warn('⚠️ IMPORTANTE: Ejecuta el script ARREGLAR_AHORA.sql en Supabase para corregir esto');
   }
 
   if (service.id) {

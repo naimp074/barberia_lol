@@ -179,7 +179,13 @@ export function Dashboard() {
       console.error('❌ Error adding service:', error);
       const errorMessage = error?.message || error?.toString() || 'Error desconocido';
       console.error('Mensaje de error completo:', errorMessage);
-      alert(`Error al guardar el servicio:\n\n${errorMessage}\n\nPor favor, verifica la consola (F12) para más detalles.`);
+      
+      // Si es un error de foreign key, mostrar instrucciones específicas
+      if (errorMessage.includes('foreign key') || errorMessage.includes('Key is not present')) {
+        alert(`❌ Error de configuración de base de datos\n\nEl problema es que la tabla 'services' está intentando referenciar un usuario que no existe.\n\nSOLUCIÓN:\n\n1. Ve a Supabase Dashboard → SQL Editor\n2. Abre el archivo ARREGLAR_AHORA.sql\n3. Copia TODO el contenido\n4. Pégalo en SQL Editor y ejecuta (Run)\n5. Recarga la aplicación y prueba de nuevo\n\nEste script corrige la configuración de la base de datos.`);
+      } else {
+        alert(`Error al guardar el servicio:\n\n${errorMessage}\n\nPor favor, verifica la consola (F12) para más detalles.`);
+      }
     }
   };
 
