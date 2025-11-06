@@ -52,12 +52,20 @@ export function Dashboard() {
 
   // Cargar barberos
   useEffect(() => {
-    const allBarbers = getBarbers();
-    setBarbers(allBarbers);
-    // Si hay barberos, seleccionar el primero por defecto
-    if (allBarbers.length > 0 && !selectedBarber) {
-      setSelectedBarber(allBarbers[0].id);
-    }
+    const loadBarbers = async () => {
+      try {
+        const allBarbers = await getBarbers();
+        setBarbers(allBarbers);
+        // Si hay barberos y no hay uno seleccionado, seleccionar el primero por defecto
+        if (allBarbers.length > 0 && !selectedBarber) {
+          setSelectedBarber(allBarbers[0].id);
+        }
+      } catch (error) {
+        console.error('Error loading barbers:', error);
+      }
+    };
+    loadBarbers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -101,10 +109,27 @@ export function Dashboard() {
   };
 
   const addService = async (serviceType: ServiceType) => {
-    if (!user) return;
+    if (!user) {
+      console.error('No hay usuario autenticado');
+      return;
+    }
+
+    if (!selectedBarber) {
+      console.error('No hay barbero seleccionado');
+      alert('Por favor, selecciona un barbero antes de registrar un servicio');
+      return;
+    }
 
     try {
       const selectedBarberData = barbers.find((b) => b.id === selectedBarber);
+      console.log('Guardando servicio:', {
+        user_id: user.id,
+        name: serviceType.name,
+        price: serviceType.price,
+        barber_id: selectedBarber,
+        barber_name: selectedBarberData?.name,
+      });
+
       const newService = await saveService({
         user_id: user.id,
         name: serviceType.name,
@@ -115,6 +140,7 @@ export function Dashboard() {
       });
 
       if (newService) {
+        console.log('Servicio guardado exitosamente:', newService);
         // Actualizar el estado local
         setServices((prev) => [
           {
@@ -127,9 +153,13 @@ export function Dashboard() {
           },
           ...prev,
         ]);
+      } else {
+        console.error('Error: saveService retornó null');
+        alert('Error al guardar el servicio. Por favor, intenta de nuevo.');
       }
     } catch (error) {
       console.error('Error adding service:', error);
+      alert('Error al guardar el servicio: ' + (error instanceof Error ? error.message : 'Error desconocido'));
     }
   };
 

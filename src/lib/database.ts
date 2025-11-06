@@ -139,6 +139,17 @@ export async function getServices(userId?: string): Promise<Service[]> {
 }
 
 export async function saveService(service: Partial<Service>): Promise<Service | null> {
+  // Obtener el usuario actual de Supabase Auth para usar auth.uid()
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  
+  if (!authUser) {
+    console.error('Error: No hay usuario autenticado');
+    return null;
+  }
+
+  // Usar auth.uid() para cumplir con las políticas RLS
+  const userId = authUser.id;
+
   if (service.id) {
     // Actualizar servicio existente
     const { data, error } = await supabase
@@ -152,6 +163,7 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
         updated_at: new Date().toISOString(),
       })
       .eq('id', service.id)
+      .eq('user_id', userId) // Asegurar que solo se actualice el servicio del usuario actual
       .select()
       .single();
 
@@ -166,7 +178,7 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
     const { data, error } = await supabase
       .from('services')
       .insert({
-        user_id: service.user_id!,
+        user_id: userId, // Usar auth.uid() en lugar del user_id del parámetro
         name: service.name!,
         price: service.price!,
         barber_id: service.barber_id,
@@ -178,6 +190,12 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
 
     if (error) {
       console.error('Error creating service:', error);
+      console.error('Error details:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      });
       return null;
     }
 
@@ -186,11 +204,22 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
 }
 
 export async function deleteService(serviceId: string, userId: string): Promise<boolean> {
+  // Obtener el usuario actual de Supabase Auth para usar auth.uid()
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  
+  if (!authUser) {
+    console.error('Error: No hay usuario autenticado');
+    return false;
+  }
+
+  // Usar auth.uid() para cumplir con las políticas RLS
+  const currentUserId = authUser.id;
+
   const { error } = await supabase
     .from('services')
     .delete()
     .eq('id', serviceId)
-    .eq('user_id', userId);
+    .eq('user_id', currentUserId); // Usar auth.uid() en lugar del userId del parámetro
 
   if (error) {
     console.error('Error deleting service:', error);
