@@ -109,6 +109,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    // Timeout de seguridad: siempre resetear loading después de 10 segundos máximo
+    const safetyTimeout = setTimeout(() => {
+      console.warn('⚠️ Timeout de seguridad: reseteando loading después de 10 segundos');
+      setLoading(false);
+    }, 10000);
+
     // Verificar sesión actual
     const initAuth = async () => {
       try {
@@ -119,6 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error('❌ Error inicializando autenticación:', error);
         setUser(null);
       } finally {
+        clearTimeout(safetyTimeout); // Limpiar timeout si todo fue bien
         setLoading(false);
         console.log('✅ Loading reseteado después de initAuth');
       }
@@ -129,6 +136,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Escuchar cambios en la autenticación
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔔 Auth state changed:', event, session?.user?.email);
+      
+      // Timeout de seguridad para onAuthStateChange
+      const changeTimeout = setTimeout(() => {
+        console.warn('⚠️ Timeout de seguridad en onAuthStateChange: reseteando loading');
+        setLoading(false);
+      }, 10000);
+      
       try {
         if (event === 'SIGNED_IN' && session?.user) {
           console.log('🔐 Usuario autenticado, refrescando...');
@@ -143,6 +157,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error('❌ Error en onAuthStateChange:', error);
         setUser(null);
       } finally {
+        clearTimeout(changeTimeout); // Limpiar timeout si todo fue bien
         setLoading(false);
         console.log('✅ Loading reseteado después de onAuthStateChange');
       }
