@@ -30,13 +30,13 @@ function App() {
   const { user, loading } = useAuth();
   const [forceShow, setForceShow] = useState(false);
 
-  // Timeout de emergencia: si loading está en true por más de 15 segundos, forzar mostrar
+  // Timeout de emergencia: si loading está en true por más de 8 segundos, forzar mostrar
   useEffect(() => {
     if (loading) {
       const emergencyTimeout = setTimeout(() => {
-        console.warn('⚠️ EMERGENCIA: Loading está en true por más de 15 segundos, forzando mostrar login');
+        console.warn('⚠️ EMERGENCIA: Loading está en true por más de 8 segundos, forzando mostrar');
         setForceShow(true);
-      }, 15000);
+      }, 8000);
 
       return () => clearTimeout(emergencyTimeout);
     } else {

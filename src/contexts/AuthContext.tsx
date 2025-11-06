@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { findUserByEmail, saveUser } from '../lib/database';
 
@@ -33,70 +33,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (authError) {
         console.error('❌ Error obteniendo usuario de Auth:', authError);
         setUser(null);
-        throw authError;
+        return;
       }
       
       if (authUser) {
         console.log('✅ Usuario de Auth encontrado:', authUser.email);
         
-        // Buscar o crear usuario en la tabla users
-        console.log('🔍 Buscando usuario en DB...');
-        let dbUser = await findUserByEmail(authUser.email!);
+        // Usar directamente el usuario de Auth - ya no necesitamos buscar en public.users
+        // porque services.user_id ahora referencia auth.users directamente
+        setUser({
+          id: authUser.id,
+          email: authUser.email!,
+          created_at: authUser.created_at || new Date().toISOString(),
+        });
         
-        if (!dbUser) {
-          console.log('📝 Usuario no existe en DB, creando...');
-          // Crear usuario en la tabla users si no existe
-          dbUser = await saveUser({ email: authUser.email! });
-          
+        // Intentar crear el usuario en public.users en segundo plano (sin bloquear)
+        // Esto es solo para mantener la consistencia de datos
+        findUserByEmail(authUser.email!).then(dbUser => {
           if (!dbUser) {
-            console.error('❌ Error al crear usuario en DB: saveUser retornó null');
-            // Si no se puede crear, usar datos del usuario de Auth directamente
-            console.warn('⚠️ Usando datos del usuario de Auth directamente');
-            setUser({
-              id: authUser.id,
-              email: authUser.email!,
-              created_at: authUser.created_at || new Date().toISOString(),
+            console.log('📝 Creando usuario en public.users en segundo plano...');
+            saveUser({ email: authUser.email! }).then(createdUser => {
+              if (createdUser) {
+                console.log('✅ Usuario creado en public.users:', createdUser.id);
+              }
+            }).catch(err => {
+              console.warn('⚠️ Error al crear usuario en public.users (no crítico):', err);
             });
-            return;
           }
-          console.log('✅ Usuario creado en DB:', dbUser.id);
-        } else {
-          console.log('✅ Usuario encontrado en DB:', dbUser.id);
-        }
+        }).catch(err => {
+          console.warn('⚠️ Error al buscar usuario en public.users (no crítico):', err);
+        });
         
-        if (dbUser) {
-          setUser({
-            id: dbUser.id,
-            email: dbUser.email,
-            created_at: dbUser.created_at,
-          });
-          console.log('✅ Usuario actualizado en contexto - refreshUser completado');
-        } else {
-          console.warn('⚠️ dbUser es null después de buscar/crear, usando Auth user');
-          setUser({
-            id: authUser.id,
-            email: authUser.email!,
-            created_at: authUser.created_at || new Date().toISOString(),
-          });
-        }
+        console.log('✅ Usuario actualizado en contexto - refreshUser completado');
       } else {
         console.log('⚠️ No hay usuario de Auth');
         setUser(null);
       }
     } catch (error: any) {
       console.error('❌ Error refreshing user:', error);
-      // Si hay un error pero tenemos un usuario de Auth, usar ese
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (authUser) {
-        console.warn('⚠️ Error en refreshUser pero usuario de Auth disponible, usando datos de Auth');
-        setUser({
-          id: authUser.id,
-          email: authUser.email!,
-          created_at: authUser.created_at || new Date().toISOString(),
-        });
-      } else {
+      // Si hay un error, intentar obtener el usuario de Auth una vez más
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          console.warn('⚠️ Error en refreshUser pero usuario de Auth disponible, usando datos de Auth');
+          setUser({
+            id: authUser.id,
+            email: authUser.email!,
+            created_at: authUser.created_at || new Date().toISOString(),
+          });
+        } else {
+          setUser(null);
+        }
+      } catch (secondError) {
+        console.error('❌ Error al obtener usuario en catch:', secondError);
         setUser(null);
-        throw error;
       }
     } finally {
       setIsRefreshing(false);
@@ -104,15 +94,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const isProcessingAuthChangeRef = useRef(false);
+
   useEffect(() => {
     let safetyTimeout: NodeJS.Timeout | null = null;
     let subscription: { unsubscribe: () => void } | null = null;
 
-    // Timeout de seguridad: siempre resetear loading después de 15 segundos máximo
+    // Timeout de seguridad: siempre resetear loading después de 10 segundos máximo
     safetyTimeout = setTimeout(() => {
-      console.warn('⚠️ Timeout de seguridad: reseteando loading después de 15 segundos');
+      console.warn('⚠️ Timeout de seguridad: reseteando loading después de 10 segundos');
       setLoading(false);
-    }, 15000);
+    }, 10000);
 
     // Verificar sesión actual
     const initAuth = async () => {
@@ -139,29 +131,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔔 Auth state changed:', event, session?.user?.email);
       
+      // Prevenir procesamiento múltiple del mismo evento
+      if (isProcessingAuthChangeRef.current) {
+        console.log('⚠️ onAuthStateChange ya está procesando, omitiendo...');
+        return;
+      }
+      
+      isProcessingAuthChangeRef.current = true;
+      
       try {
         if (event === 'SIGNED_IN' && session?.user) {
           console.log('🔐 Usuario autenticado, refrescando...');
           setLoading(true);
           await refreshUser();
           console.log('✅ Refresh completado después de SIGNED_IN');
-          setLoading(false);
         } else if (event === 'SIGNED_OUT') {
           console.log('🚪 Usuario cerró sesión');
           setUser(null);
-          setLoading(false);
         } else if (event === 'TOKEN_REFRESHED') {
           // Solo refrescar si no hay usuario en el contexto
           if (!user) {
             console.log('🔄 Token refrescado, verificando usuario...');
             await refreshUser();
           }
-          setLoading(false);
         }
       } catch (error) {
         console.error('❌ Error en onAuthStateChange:', error);
-        // No establecer user como null si hay un error, puede ser temporal
+        // Si hay error pero tenemos sesión, usar los datos de la sesión
+        if (session?.user) {
+          setUser({
+            id: session.user.id,
+            email: session.user.email!,
+            created_at: session.user.created_at || new Date().toISOString(),
+          });
+        } else {
+          setUser(null);
+        }
+      } finally {
         setLoading(false);
+        isProcessingAuthChangeRef.current = false;
+        console.log('✅ Loading reseteado después de onAuthStateChange');
       }
     });
 
