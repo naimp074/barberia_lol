@@ -27,26 +27,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       console.log('🔄 refreshUser: Obteniendo usuario de Supabase Auth...');
       
-      // Agregar timeout a getUser
-      const getUserPromise = supabase.auth.getUser();
-      const getUserTimeout = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout: getUser tardó más de 5 segundos')), 5000)
-      );
-      
-      let authResult;
-      try {
-        authResult = await Promise.race([
-          getUserPromise,
-          getUserTimeout
-        ]);
-      } catch (timeoutError: any) {
-        if (timeoutError.message?.includes('Timeout')) {
-          throw new Error('Timeout: La operación de autenticación tardó demasiado. Verifica tu conexión.');
-        }
-        throw timeoutError;
-      }
-      
-      const { data: { user: authUser }, error: authError } = authResult;
+      // Obtener usuario de Supabase (sin timeout agresivo, Supabase ya maneja su propio timeout)
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
       
       if (authError) {
         console.error('❌ Error obteniendo usuario de Auth:', authError);
@@ -59,10 +41,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Buscar o crear usuario en la tabla users
         console.log('🔍 Buscando usuario en DB...');
         
-        // Agregar timeout a findUserByEmail
+        // Buscar usuario en DB (con timeout más generoso)
         const findUserPromise = findUserByEmail(authUser.email!);
         const findUserTimeout = new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout: findUserByEmail tardó más de 5 segundos')), 5000)
+          setTimeout(() => reject(new Error('Timeout: findUserByEmail tardó más de 10 segundos')), 10000)
         );
         
         let dbUser;
@@ -70,25 +52,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           dbUser = await Promise.race([findUserPromise, findUserTimeout]);
         } catch (timeoutError: any) {
           if (timeoutError.message?.includes('Timeout')) {
-            throw new Error('Timeout: La búsqueda del usuario tardó demasiado. Verifica tu conexión.');
+            console.warn('⚠️ Timeout en findUserByEmail, intentando continuar...');
+            // Si falla la búsqueda, intentamos crear el usuario directamente
+            dbUser = null;
+          } else {
+            throw timeoutError;
           }
-          throw timeoutError;
         }
         
         if (!dbUser) {
           console.log('📝 Usuario no existe en DB, creando...');
           // Crear usuario en la tabla users si no existe
           try {
-            // Agregar timeout a saveUser
+            // Crear usuario en DB (con timeout más generoso)
             const saveUserPromise = saveUser({ email: authUser.email! });
             const saveUserTimeout = new Promise<never>((_, reject) => 
-              setTimeout(() => reject(new Error('Timeout: saveUser tardó más de 5 segundos')), 5000)
+              setTimeout(() => reject(new Error('Timeout: saveUser tardó más de 10 segundos')), 10000)
             );
             
             try {
               dbUser = await Promise.race([saveUserPromise, saveUserTimeout]);
             } catch (timeoutError: any) {
               if (timeoutError.message?.includes('Timeout')) {
+                console.error('❌ Timeout al crear usuario en DB');
                 throw new Error('Timeout: La creación del usuario tardó demasiado. Verifica tu conexión y permisos RLS.');
               }
               throw timeoutError;
