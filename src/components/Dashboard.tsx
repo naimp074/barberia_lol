@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Scissors, Calendar as CalendarIcon, Trash2 } from 'lucide-react';
+import { Scissors, Calendar as CalendarIcon, Trash2, Edit2, Plus, Save, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { 
@@ -42,6 +42,14 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [barbers, setBarbers] = useState<Barber[]>([]);
   const [selectedBarber, setSelectedBarber] = useState<string>('');
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<Partial<Service>>({});
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newServiceForm, setNewServiceForm] = useState({
+    name: '',
+    price: 0,
+    timestamp: new Date().toISOString().slice(0, 16), // Formato datetime-local
+  });
 
   // Cargar tipos de servicio desde localStorage
   useEffect(() => {
@@ -202,6 +210,135 @@ export function Dashboard() {
     }
   };
 
+  const handleEditService = (service: Service) => {
+    setEditingServiceId(service.id);
+    setEditForm({
+      name: service.name,
+      price: service.price,
+      barber_id: service.barber_id || '',
+      timestamp: service.timestamp,
+    });
+  };
+
+  const getEditFormTimestampString = (): string => {
+    if (!editForm.timestamp) return new Date().toISOString().slice(0, 16);
+    if (editForm.timestamp instanceof Date) {
+      return editForm.timestamp.toISOString().slice(0, 16);
+    }
+    return new Date(editForm.timestamp).toISOString().slice(0, 16);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!user || !editingServiceId) return;
+
+    try {
+      const serviceToUpdate = services.find(s => s.id === editingServiceId);
+      if (!serviceToUpdate) return;
+
+      const selectedBarberData = barbers.find((b) => b.id === editForm.barber_id);
+      
+      const timestamp = editForm.timestamp 
+        ? new Date(editForm.timestamp).toISOString()
+        : serviceToUpdate.timestamp.toISOString();
+
+      const updatedService = await saveService({
+        id: editingServiceId,
+        name: editForm.name,
+        price: editForm.price,
+        barber_id: editForm.barber_id || undefined,
+        barber_name: selectedBarberData?.name || undefined,
+        timestamp: timestamp,
+      });
+
+      if (updatedService) {
+        setServices((prev) =>
+          prev.map((service) =>
+            service.id === editingServiceId
+              ? {
+                  id: updatedService.id,
+                  name: updatedService.name,
+                  price: updatedService.price,
+                  timestamp: new Date(updatedService.timestamp),
+                  barber_id: updatedService.barber_id,
+                  barber_name: updatedService.barber_name,
+                }
+              : service
+          )
+        );
+        setEditingServiceId(null);
+        setEditForm({});
+      } else {
+        alert('Error al actualizar el servicio. Por favor, intenta de nuevo.');
+      }
+    } catch (error: any) {
+      console.error('Error updating service:', error);
+      alert(`Error al actualizar el servicio: ${error?.message || 'Error desconocido'}`);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingServiceId(null);
+    setEditForm({});
+  };
+
+  const handleAddCustomService = async () => {
+    if (!user) {
+      alert('No hay usuario autenticado. Por favor, inicia sesión nuevamente.');
+      return;
+    }
+
+    if (!newServiceForm.name.trim() || newServiceForm.price <= 0) {
+      alert('Por favor, completa el nombre y el precio del servicio.');
+      return;
+    }
+
+    if (!selectedBarber) {
+      alert('Por favor, selecciona un barbero antes de registrar un servicio');
+      return;
+    }
+
+    try {
+      const selectedBarberData = barbers.find((b) => b.id === selectedBarber);
+      const timestamp = newServiceForm.timestamp 
+        ? new Date(newServiceForm.timestamp).toISOString()
+        : new Date().toISOString();
+
+      const newService = await saveService({
+        user_id: user.id,
+        name: newServiceForm.name,
+        price: newServiceForm.price,
+        timestamp: timestamp,
+        barber_id: selectedBarber || undefined,
+        barber_name: selectedBarberData?.name || undefined,
+      });
+
+      if (newService) {
+        setServices((prev) => [
+          {
+            id: newService.id,
+            name: newService.name,
+            price: newService.price,
+            timestamp: new Date(newService.timestamp),
+            barber_id: newService.barber_id,
+            barber_name: newService.barber_name,
+          },
+          ...prev,
+        ]);
+        setNewServiceForm({
+          name: '',
+          price: 0,
+          timestamp: new Date().toISOString().slice(0, 16),
+        });
+        setShowAddForm(false);
+      } else {
+        alert('Error al guardar el servicio. Por favor, intenta de nuevo.');
+      }
+    } catch (error: any) {
+      console.error('Error adding custom service:', error);
+      alert(`Error al guardar el servicio: ${error?.message || 'Error desconocido'}`);
+    }
+  };
+
   const getTodaysServices = () => {
     const today = new Date();
     return services.filter((service) => {
@@ -322,6 +459,70 @@ export function Dashboard() {
                 </div>
               )}
 
+              {/* Botón para agregar servicio personalizado */}
+              <div className="mb-4">
+                <button
+                  onClick={() => setShowAddForm(!showAddForm)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 border border-gray-700 rounded-lg text-white transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  {showAddForm ? 'Cancelar' : 'Agregar Servicio Personalizado'}
+                </button>
+              </div>
+
+              {/* Formulario para agregar servicio personalizado */}
+              {showAddForm && (
+                <div className="mb-4 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+                  <h3 className="text-white font-semibold mb-3">Nuevo Servicio</h3>
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      placeholder="Nombre del servicio"
+                      value={newServiceForm.name}
+                      onChange={(e) => setNewServiceForm({ ...newServiceForm, name: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-white"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Precio"
+                      value={newServiceForm.price || ''}
+                      onChange={(e) => setNewServiceForm({ ...newServiceForm, price: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-white"
+                      min="0"
+                    />
+                    <input
+                      type="datetime-local"
+                      value={newServiceForm.timestamp}
+                      onChange={(e) => setNewServiceForm({ ...newServiceForm, timestamp: e.target.value })}
+                      className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-white"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleAddCustomService}
+                        disabled={!selectedBarber || barbers.length === 0}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-white text-black font-semibold rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Save className="w-4 h-4" />
+                        Guardar
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowAddForm(false);
+                          setNewServiceForm({
+                            name: '',
+                            price: 0,
+                            timestamp: new Date().toISOString().slice(0, 16),
+                          });
+                        }}
+                        className="px-4 py-2 bg-gray-700 border border-gray-600 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 gap-4">
                 {serviceTypes.map((service, index) => (
                   <button
@@ -350,39 +551,109 @@ export function Dashboard() {
                 ) : (
                   <div className="space-y-3">
                     {todaysServices.map((service) => (
-                      <div
-                        key={service.id}
-                        className="bg-transparent rounded-lg p-4 flex justify-between items-center border border-gray-800 group hover:bg-gray-800/30 transition-colors"
-                      >
-                      <div className="flex-1">
-                        <p className="text-white font-medium">{service.name}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <p className="text-gray-400 text-sm">
-                            {service.timestamp.toLocaleTimeString('es-ES', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </p>
-                          {service.barber_name && (
-                            <>
-                              <span className="text-gray-600">•</span>
-                              <p className="text-gray-400 text-sm">
-                                Barbero: <span className="text-gray-300 font-medium">{service.barber_name}</span>
-                              </p>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                        <div className="flex items-center gap-3">
-                          <div className="text-white font-bold">{formatCurrency(service.price)}</div>
-                          <button
-                            onClick={() => deleteServiceHandler(service.id)}
-                            className="opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-all duration-200"
-                            title="Eliminar servicio"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+                      <div key={service.id}>
+                        {editingServiceId === service.id ? (
+                          <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                            <h3 className="text-white font-semibold mb-3">Editar Servicio</h3>
+                            <div className="space-y-3">
+                              <input
+                                type="text"
+                                value={editForm.name || ''}
+                                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                                className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-white"
+                                placeholder="Nombre del servicio"
+                              />
+                              <input
+                                type="number"
+                                value={editForm.price || ''}
+                                onChange={(e) => setEditForm({ ...editForm, price: Number(e.target.value) })}
+                                className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-white"
+                                placeholder="Precio"
+                                min="0"
+                              />
+                              {barbers.length > 0 && (
+                                <select
+                                  value={editForm.barber_id || ''}
+                                  onChange={(e) => setEditForm({ ...editForm, barber_id: e.target.value })}
+                                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-white"
+                                >
+                                  <option value="">Seleccionar barbero</option>
+                                  {barbers.map((barber) => (
+                                    <option key={barber.id} value={barber.id}>
+                                      {barber.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                              <input
+                                type="datetime-local"
+                                value={getEditFormTimestampString()}
+                                onChange={(e) => {
+                                  const newTimestamp = e.target.value ? new Date(e.target.value) : new Date();
+                                  setEditForm({ 
+                                    ...editForm, 
+                                    timestamp: newTimestamp
+                                  });
+                                }}
+                                className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-white"
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={handleSaveEdit}
+                                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-white text-black font-semibold rounded-lg hover:bg-gray-200 transition-colors"
+                                >
+                                  <Save className="w-4 h-4" />
+                                  Guardar
+                                </button>
+                                <button
+                                  onClick={handleCancelEdit}
+                                  className="px-4 py-2 bg-gray-700 border border-gray-600 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-transparent rounded-lg p-4 flex justify-between items-center border border-gray-800 group hover:bg-gray-800/30 transition-colors">
+                            <div className="flex-1">
+                              <p className="text-white font-medium">{service.name}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <p className="text-gray-400 text-sm">
+                                  {service.timestamp.toLocaleTimeString('es-ES', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </p>
+                                {service.barber_name && (
+                                  <>
+                                    <span className="text-gray-600">•</span>
+                                    <p className="text-gray-400 text-sm">
+                                      Barbero: <span className="text-gray-300 font-medium">{service.barber_name}</span>
+                                    </p>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-white font-bold">{formatCurrency(service.price)}</div>
+                              <button
+                                onClick={() => handleEditService(service)}
+                                className="opacity-0 group-hover:opacity-100 p-2 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded-lg transition-all duration-200"
+                                title="Editar servicio"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => deleteServiceHandler(service.id)}
+                                className="opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-all duration-200"
+                                title="Eliminar servicio"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
