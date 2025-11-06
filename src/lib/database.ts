@@ -77,6 +77,17 @@ export async function findUserByEmail(email: string): Promise<User | null> {
 }
 
 export async function saveUser(user: Partial<User>): Promise<User | null> {
+  // Obtener el usuario autenticado de Supabase Auth
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  
+  if (!authUser) {
+    console.error('Error: No hay usuario autenticado para crear usuario en DB');
+    return null;
+  }
+
+  // Usar el ID de auth.users como ID en public.users
+  const userId = authUser.id;
+
   if (user.id) {
     // Actualizar usuario existente
     const { data, error } = await supabase
@@ -96,16 +107,23 @@ export async function saveUser(user: Partial<User>): Promise<User | null> {
 
     return data;
   } else {
-    // Crear nuevo usuario
+    // Crear nuevo usuario usando el ID de auth.users
+    // Esto asegura que el ID coincida con auth.uid()
     const { data, error } = await supabase
       .from('users')
       .insert({
-        email: user.email,
+        id: userId, // Usar el mismo ID que auth.users
+        email: user.email || authUser.email!,
       })
       .select()
       .single();
 
     if (error) {
+      // Si el error es porque el usuario ya existe, intentar buscarlo
+      if (error.code === '23505') { // Unique violation
+        console.log('Usuario ya existe, buscándolo...');
+        return await findUserByEmail(authUser.email!);
+      }
       console.error('Error creating user:', error);
       return null;
     }

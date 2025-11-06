@@ -174,7 +174,7 @@ export function Dashboard() {
         console.log('✅ Servicio registrado correctamente');
       } else {
         console.error('❌ Error: saveService retornó null');
-        alert('Error al guardar el servicio. Por favor, verifica la consola para más detalles.');
+        alert('Error al guardar el servicio. Por favor:\n\n1. Abre la consola (F12) y revisa los errores\n2. Ejecuta el script SQL en Supabase (ver archivo SOLUCION_COMPLETA.sql)\n3. Recarga la página e intenta de nuevo');
       }
     } catch (error: any) {
       console.error('❌ Error adding service:', error);
