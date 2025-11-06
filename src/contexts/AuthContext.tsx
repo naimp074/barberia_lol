@@ -29,14 +29,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       // Agregar timeout a getUser
       const getUserPromise = supabase.auth.getUser();
-      const getUserTimeout = new Promise((_, reject) => 
+      const getUserTimeout = new Promise<never>((_, reject) => 
         setTimeout(() => reject(new Error('Timeout: getUser tardó más de 5 segundos')), 5000)
       );
       
-      const { data: { user: authUser }, error: authError } = await Promise.race([
-        getUserPromise,
-        getUserTimeout
-      ]) as any;
+      let authResult;
+      try {
+        authResult = await Promise.race([
+          getUserPromise,
+          getUserTimeout
+        ]);
+      } catch (timeoutError: any) {
+        if (timeoutError.message?.includes('Timeout')) {
+          throw new Error('Timeout: La operación de autenticación tardó demasiado. Verifica tu conexión.');
+        }
+        throw timeoutError;
+      }
+      
+      const { data: { user: authUser }, error: authError } = authResult;
       
       if (authError) {
         console.error('❌ Error obteniendo usuario de Auth:', authError);
@@ -51,11 +61,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         // Agregar timeout a findUserByEmail
         const findUserPromise = findUserByEmail(authUser.email!);
-        const findUserTimeout = new Promise((_, reject) => 
+        const findUserTimeout = new Promise<never>((_, reject) => 
           setTimeout(() => reject(new Error('Timeout: findUserByEmail tardó más de 5 segundos')), 5000)
         );
         
-        let dbUser = await Promise.race([findUserPromise, findUserTimeout]) as any;
+        let dbUser;
+        try {
+          dbUser = await Promise.race([findUserPromise, findUserTimeout]);
+        } catch (timeoutError: any) {
+          if (timeoutError.message?.includes('Timeout')) {
+            throw new Error('Timeout: La búsqueda del usuario tardó demasiado. Verifica tu conexión.');
+          }
+          throw timeoutError;
+        }
         
         if (!dbUser) {
           console.log('📝 Usuario no existe en DB, creando...');
@@ -63,11 +81,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             // Agregar timeout a saveUser
             const saveUserPromise = saveUser({ email: authUser.email! });
-            const saveUserTimeout = new Promise((_, reject) => 
+            const saveUserTimeout = new Promise<never>((_, reject) => 
               setTimeout(() => reject(new Error('Timeout: saveUser tardó más de 5 segundos')), 5000)
             );
             
-            dbUser = await Promise.race([saveUserPromise, saveUserTimeout]) as any;
+            try {
+              dbUser = await Promise.race([saveUserPromise, saveUserTimeout]);
+            } catch (timeoutError: any) {
+              if (timeoutError.message?.includes('Timeout')) {
+                throw new Error('Timeout: La creación del usuario tardó demasiado. Verifica tu conexión y permisos RLS.');
+              }
+              throw timeoutError;
+            }
             
             if (!dbUser) {
               console.error('❌ Error al crear usuario en DB: saveUser retornó null');
@@ -109,8 +134,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    let safetyTimeout: NodeJS.Timeout | null = null;
+    let subscription: { unsubscribe: () => void } | null = null;
+
     // Timeout de seguridad: siempre resetear loading después de 10 segundos máximo
-    const safetyTimeout = setTimeout(() => {
+    safetyTimeout = setTimeout(() => {
       console.warn('⚠️ Timeout de seguridad: reseteando loading después de 10 segundos');
       setLoading(false);
     }, 10000);
@@ -125,7 +153,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error('❌ Error inicializando autenticación:', error);
         setUser(null);
       } finally {
-        clearTimeout(safetyTimeout); // Limpiar timeout si todo fue bien
+        if (safetyTimeout) {
+          clearTimeout(safetyTimeout);
+          safetyTimeout = null;
+        }
         setLoading(false);
         console.log('✅ Loading reseteado después de initAuth');
       }
@@ -134,11 +165,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initAuth();
 
     // Escuchar cambios en la autenticación
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔔 Auth state changed:', event, session?.user?.email);
       
+      let changeTimeout: NodeJS.Timeout | null = null;
+      
       // Timeout de seguridad para onAuthStateChange
-      const changeTimeout = setTimeout(() => {
+      changeTimeout = setTimeout(() => {
         console.warn('⚠️ Timeout de seguridad en onAuthStateChange: reseteando loading');
         setLoading(false);
       }, 10000);
@@ -157,14 +190,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error('❌ Error en onAuthStateChange:', error);
         setUser(null);
       } finally {
-        clearTimeout(changeTimeout); // Limpiar timeout si todo fue bien
+        if (changeTimeout) {
+          clearTimeout(changeTimeout);
+        }
         setLoading(false);
         console.log('✅ Loading reseteado después de onAuthStateChange');
       }
     });
 
+    subscription = authSubscription;
+
     return () => {
-      subscription.unsubscribe();
+      if (subscription) {
+        subscription.unsubscribe();
+      }
+      if (safetyTimeout) {
+        clearTimeout(safetyTimeout);
+      }
     };
   }, []);
 
