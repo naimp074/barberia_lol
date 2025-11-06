@@ -48,32 +48,15 @@ export function AuthForm({ onSuccess }: AuthFormProps) {
         }
 
         if (data.user) {
-          // Login exitoso - refrescar usuario
-          try {
-            console.log('🔄 Refrescando usuario después de login...');
-            await refreshUser();
-            console.log('✅ Usuario refrescado correctamente');
-            
-            // Esperar un momento para que el estado se actualice en el contexto
-            await new Promise(resolve => setTimeout(resolve, 300));
-            
-            // Llamar onSuccess para que App.tsx maneje la navegación
+          // Login exitoso - onAuthStateChange se encargará de refrescar el usuario
+          // Solo esperamos un momento para que el evento se dispare
+          console.log('✅ Login exitoso, esperando actualización de onAuthStateChange...');
+          setLoading(false);
+          
+          // Pequeño delay para permitir que onAuthStateChange procese el SIGNED_IN
+          setTimeout(() => {
             onSuccess();
-          } catch (err: any) {
-            console.error('❌ Error en refreshUser:', err);
-            const errorMsg = err.message || 'Error desconocido';
-            
-            // Si hay un error pero el usuario está autenticado, intentar continuar
-            if (data.user) {
-              console.warn('⚠️ Error en refreshUser pero usuario autenticado, continuando...');
-              setTimeout(() => {
-                onSuccess();
-              }, 500);
-            } else {
-              setError(`Error al actualizar la sesión: ${errorMsg}. Por favor, intenta de nuevo.`);
-              setLoading(false);
-            }
-          }
+          }, 100);
         } else {
           setError('No se recibió información del usuario. Por favor, intenta de nuevo.');
           setLoading(false);
@@ -103,32 +86,14 @@ export function AuthForm({ onSuccess }: AuthFormProps) {
         }
 
         if (data.user) {
-          // Registro exitoso - refrescar usuario
-          try {
-            console.log('🔄 Refrescando usuario después de registro...');
-            await refreshUser();
-            console.log('✅ Usuario refrescado correctamente');
-            
-            // Esperar un momento para que el estado se actualice en el contexto
-            await new Promise(resolve => setTimeout(resolve, 300));
-            
-            // Llamar onSuccess para que App.tsx maneje la navegación
+          // Registro exitoso - onAuthStateChange se encargará de refrescar el usuario
+          console.log('✅ Registro exitoso, esperando actualización de onAuthStateChange...');
+          setLoading(false);
+          
+          // Pequeño delay para permitir que onAuthStateChange procese el SIGNED_IN
+          setTimeout(() => {
             onSuccess();
-          } catch (err: any) {
-            console.error('❌ Error en refreshUser:', err);
-            const errorMsg = err.message || 'Error desconocido';
-            
-            // Si hay un error pero el usuario está autenticado, intentar continuar
-            if (data.user) {
-              console.warn('⚠️ Error en refreshUser pero usuario autenticado, continuando...');
-              setTimeout(() => {
-                onSuccess();
-              }, 500);
-            } else {
-              setError(`Error al actualizar la sesión: ${errorMsg}. Por favor, intenta de nuevo.`);
-              setLoading(false);
-            }
-          }
+          }, 100);
         } else {
           setError('No se recibió información del usuario. Por favor, intenta de nuevo.');
           setLoading(false);
