@@ -56,73 +56,134 @@ export function Editar() {
   };
 
   const handleSave = async (index: number) => {
-    if (!user) return;
+    if (!user) {
+      alert('No hay usuario autenticado. Por favor, inicia sesión nuevamente.');
+      return;
+    }
+    
+    // Validar que el formulario tenga datos válidos
+    if (!editForm.name || editForm.name.trim() === '') {
+      alert('Por favor, ingresa un nombre para el servicio.');
+      return;
+    }
+    
+    if (!editForm.price || editForm.price <= 0) {
+      alert('Por favor, ingresa un precio válido (mayor a 0).');
+      return;
+    }
     
     const currentService = serviceTypes[index];
+    console.log('💾 Guardando servicio:', {
+      index,
+      currentService,
+      editForm,
+      hasId: !!currentService.id,
+    });
     
     try {
+      let updatedService: DatabaseServiceType | null = null;
+      
       // Si el servicio tiene ID, actualizarlo directamente
       if (currentService.id) {
-        const updatedService = await saveServiceType({
+        console.log('📝 Actualizando servicio con ID:', currentService.id);
+        updatedService = await saveServiceType({
           id: currentService.id,
           user_id: user.id,
-          name: editForm.name,
+          name: editForm.name.trim(),
           price: editForm.price,
-          icon: editForm.icon,
+          icon: editForm.icon || '✂️',
         });
         
         if (!updatedService) {
-          alert('Error al actualizar el servicio. Por favor, intenta de nuevo.');
+          console.error('❌ Error: saveServiceType retornó null para ID:', currentService.id);
+          alert('Error al actualizar el servicio. Por favor, verifica la consola (F12) para más detalles.');
           return;
         }
+        console.log('✅ Servicio actualizado exitosamente:', updatedService);
       } else {
-        // Si no tiene ID, buscar por nombre (más confiable que buscar por nombre y precio)
+        // Si no tiene ID, buscar por nombre original
+        console.log('🔍 Buscando servicio por nombre:', currentService.name);
         const dbServices = await getServiceTypes(user.id);
-        const dbService = dbServices.find(s => s.name === currentService.name);
+        console.log('📋 Servicios encontrados en BD:', dbServices);
+        
+        // Buscar por nombre original primero
+        let dbService = dbServices.find(s => s.name === currentService.name);
+        
+        // Si no se encuentra por nombre original, buscar por nombre editado
+        if (!dbService) {
+          dbService = dbServices.find(s => s.name === editForm.name.trim());
+        }
         
         if (dbService) {
+          console.log('✅ Servicio encontrado en BD, actualizando:', dbService.id);
           // Actualizar servicio existente
-          const updatedService = await saveServiceType({
+          updatedService = await saveServiceType({
             id: dbService.id,
             user_id: user.id,
-            name: editForm.name,
+            name: editForm.name.trim(),
             price: editForm.price,
-            icon: editForm.icon,
+            icon: editForm.icon || '✂️',
           });
           
           if (!updatedService) {
-            alert('Error al actualizar el servicio. Por favor, intenta de nuevo.');
+            console.error('❌ Error: saveServiceType retornó null para ID:', dbService.id);
+            alert('Error al actualizar el servicio. Por favor, verifica la consola (F12) para más detalles.');
             return;
           }
+          console.log('✅ Servicio actualizado exitosamente:', updatedService);
         } else {
+          console.log('📝 Servicio no encontrado, creando nuevo');
           // Crear nuevo servicio
-          const newService = await saveServiceType({
+          updatedService = await saveServiceType({
             user_id: user.id,
-            name: editForm.name,
+            name: editForm.name.trim(),
             price: editForm.price,
-            icon: editForm.icon,
+            icon: editForm.icon || '✂️',
           });
           
-          if (!newService) {
-            alert('Error al crear el servicio. Por favor, intenta de nuevo.');
+          if (!updatedService) {
+            console.error('❌ Error: saveServiceType retornó null al crear nuevo servicio');
+            alert('Error al crear el servicio. Por favor, verifica la consola (F12) para más detalles.');
             return;
           }
+          console.log('✅ Nuevo servicio creado exitosamente:', updatedService);
         }
       }
       
-      // Recargar servicios
+      // Recargar servicios desde la base de datos
+      console.log('🔄 Recargando servicios desde la base de datos...');
       const updatedServices = await getServiceTypes(user.id);
-      setServiceTypes(updatedServices.map(st => ({
-        id: st.id,
-        name: st.name,
-        price: st.price,
-        icon: st.icon,
-      })));
+      console.log('📋 Servicios recargados:', updatedServices);
+      
+      if (updatedServices.length > 0) {
+        setServiceTypes(updatedServices.map(st => ({
+          id: st.id,
+          name: st.name,
+          price: st.price,
+          icon: st.icon,
+        })));
+        console.log('✅ Estado actualizado con servicios de la BD');
+      } else {
+        // Si no hay servicios en BD, mantener los locales pero actualizar el editado
+        setServiceTypes(prev => prev.map((st, idx) => 
+          idx === index 
+            ? { id: updatedService?.id, name: editForm.name.trim(), price: editForm.price, icon: editForm.icon || '✂️' }
+            : st
+        ));
+        console.log('⚠️ No hay servicios en BD, actualizando estado local');
+      }
+      
       setEditingIndex(null);
       setEditForm({ name: '', price: 0, icon: '' });
+      console.log('✅ Edición completada exitosamente');
     } catch (error: any) {
-      console.error('Error al guardar servicio:', error);
-      alert(`Error al guardar el servicio: ${error?.message || 'Error desconocido'}`);
+      console.error('❌ Error al guardar servicio:', error);
+      console.error('Detalles del error:', {
+        message: error?.message,
+        stack: error?.stack,
+        code: error?.code,
+      });
+      alert(`Error al guardar el servicio:\n\n${error?.message || 'Error desconocido'}\n\nPor favor, verifica la consola (F12) para más detalles.`);
     }
   };
 

@@ -589,8 +589,17 @@ export async function getServiceTypes(userId: string): Promise<ServiceType[]> {
 }
 
 export async function saveServiceType(serviceType: Partial<ServiceType>): Promise<ServiceType | null> {
+  console.log('💾 saveServiceType llamado con:', {
+    id: serviceType.id,
+    user_id: serviceType.user_id,
+    name: serviceType.name,
+    price: serviceType.price,
+    icon: serviceType.icon,
+  });
+
   if (serviceType.id) {
     // Actualizar tipo de servicio existente
+    console.log('📝 Actualizando service_type con ID:', serviceType.id);
     const { data, error } = await supabase
       .from('service_types')
       .update({
@@ -604,13 +613,21 @@ export async function saveServiceType(serviceType: Partial<ServiceType>): Promis
       .single();
 
     if (error) {
-      console.error('Error updating service type:', error);
+      console.error('❌ Error updating service type:', error);
+      console.error('Detalles del error:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      });
       return null;
     }
 
+    console.log('✅ Service type actualizado exitosamente:', data);
     return data;
   } else {
     // Crear nuevo tipo de servicio
+    console.log('📝 Creando nuevo service_type');
     const { data, error } = await supabase
       .from('service_types')
       .insert({
@@ -623,10 +640,17 @@ export async function saveServiceType(serviceType: Partial<ServiceType>): Promis
       .single();
 
     if (error) {
-      console.error('Error creating service type:', error);
+      console.error('❌ Error creating service type:', error);
+      console.error('Detalles del error:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      });
       return null;
     }
 
+    console.log('✅ Service type creado exitosamente:', data);
     return data;
   }
 }
