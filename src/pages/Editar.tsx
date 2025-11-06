@@ -100,19 +100,30 @@ export function Editar() {
                     price: created.price,
                     icon: created.icon,
                   });
+                  console.log(`✅ Tipo "${type.name}" creado con ID:`, created.id);
+                } else {
+                  console.warn(`⚠️ No se pudo crear tipo "${type.name}"`);
+                  // Agregar de todos modos sin ID para que se muestre
+                  createdTypes.push({
+                    ...type,
+                    id: undefined,
+                  });
                 }
-              } catch (error) {
+              } catch (error: any) {
                 console.error(`Error creando tipo ${type.name}:`, error);
+                // Agregar de todos modos sin ID para que se muestre
+                createdTypes.push({
+                  ...type,
+                  id: undefined,
+                });
               }
+              // Pequeño delay para evitar sobrecarga
+              await new Promise(resolve => setTimeout(resolve, 100));
             }
             
-            if (createdTypes.length > 0) {
-              setServiceTypes(createdTypes);
-              console.log('✅ Tipos de servicio por defecto creados:', createdTypes.length);
-            } else {
-              // Si no se pudieron crear, usar los valores por defecto sin ID
-              setServiceTypes(defaultTypesToCreate.map(t => ({ ...t, id: undefined })));
-            }
+            // Siempre establecer los tipos (creados o no)
+            setServiceTypes(createdTypes);
+            console.log('✅ Tipos de servicio cargados:', createdTypes.length, '(creados en BD:', createdTypes.filter(t => t.id).length, ')');
           }
         } catch (error: any) {
           console.error('Error loading service types:', error);
@@ -314,41 +325,77 @@ export function Editar() {
         }
       }
       
-      // Recargar servicios desde la base de datos
+      // Actualizar el estado local inmediatamente con el servicio actualizado
+      if (updatedService) {
+        setServiceTypes(prev => {
+          const updated = prev.map((st, idx) => {
+            if (idx === index) {
+              return {
+                id: updatedService.id,
+                name: editForm.name.trim(),
+                price: editForm.price,
+                icon: editForm.icon || '✂️',
+              };
+            }
+            return st;
+          });
+          console.log('✅ Estado local actualizado inmediatamente');
+          return updated;
+        });
+      }
+      
+      // Recargar TODOS los servicios desde la base de datos para asegurar sincronización
       console.log('🔄 Recargando servicios desde la base de datos...');
       try {
         const updatedServices = await getServiceTypes(user.id);
-        console.log('📋 Servicios recargados:', updatedServices);
+        console.log('📋 Servicios recargados desde BD:', updatedServices.length);
         
         if (updatedServices.length > 0) {
-          setServiceTypes(updatedServices.map(st => ({
-            id: st.id,
-            name: st.name,
-            price: st.price,
-            icon: st.icon,
-          })));
-          console.log('✅ Estado actualizado con servicios de la BD');
+          // Si hay servicios en BD, usarlos pero también mantener los que no están en BD
+          setServiceTypes(prev => {
+            // Crear un mapa de servicios de BD por nombre para búsqueda rápida
+            const dbServicesMap = new Map(
+              updatedServices.map(st => [st.name, {
+                id: st.id,
+                name: st.name,
+                price: st.price,
+                icon: st.icon,
+              }])
+            );
+            
+            // Combinar: servicios de BD tienen prioridad, pero mantener los locales que no están en BD
+            const combined = prev.map(localService => {
+              const dbService = dbServicesMap.get(localService.name);
+              if (dbService) {
+                // Si existe en BD, usar el de BD (tiene datos actualizados)
+                return dbService;
+              }
+              // Si no existe en BD, mantener el local
+              return localService;
+            });
+            
+            // Agregar servicios de BD que no están en el estado local
+            updatedServices.forEach(dbService => {
+              if (!prev.some(local => local.name === dbService.name)) {
+                combined.push({
+                  id: dbService.id,
+                  name: dbService.name,
+                  price: dbService.price,
+                  icon: dbService.icon,
+                });
+              }
+            });
+            
+            console.log('✅ Estado combinado (BD + locales):', combined.length);
+            return combined;
+          });
         } else {
-          // Si no hay servicios en BD pero se actualizó exitosamente, actualizar el estado local
-          if (updatedService) {
-            setServiceTypes(prev => prev.map((st, idx) => 
-              idx === index 
-                ? { id: updatedService.id, name: editForm.name.trim(), price: editForm.price, icon: editForm.icon || '✂️' }
-                : st
-            ));
-            console.log('⚠️ No hay servicios en BD, pero se actualizó el estado local');
-          }
+          // Si no hay servicios en BD, mantener el estado local actualizado
+          console.log('⚠️ No hay servicios en BD, manteniendo estado local');
         }
       } catch (reloadError) {
         console.error('Error al recargar servicios:', reloadError);
-        // Si falla la recarga, al menos actualizar el estado local con los datos guardados
-        if (updatedService) {
-          setServiceTypes(prev => prev.map((st, idx) => 
-            idx === index 
-              ? { id: updatedService.id, name: editForm.name.trim(), price: editForm.price, icon: editForm.icon || '✂️' }
-              : st
-          ));
-        }
+        // Si falla la recarga, el estado local ya está actualizado arriba
       }
       
       setEditingIndex(null);
