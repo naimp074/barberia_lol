@@ -211,21 +211,40 @@ export function Dashboard() {
   };
 
   const handleEditService = (service: Service) => {
+    console.log('🔍 Editando servicio:', service);
     setEditingServiceId(service.id);
     setEditForm({
-      name: service.name,
-      price: service.price,
+      name: service.name || '',
+      price: service.price || 0,
       barber_id: service.barber_id || '',
       timestamp: service.timestamp,
+    });
+    console.log('✅ Formulario de edición inicializado:', {
+      name: service.name,
+      price: service.price,
+      barber_id: service.barber_id,
     });
   };
 
   const getEditFormTimestampString = (): string => {
-    if (!editForm.timestamp) return new Date().toISOString().slice(0, 16);
-    if (editForm.timestamp instanceof Date) {
-      return editForm.timestamp.toISOString().slice(0, 16);
+    try {
+      if (!editForm.timestamp) {
+        const now = new Date();
+        return now.toISOString().slice(0, 16);
+      }
+      if (editForm.timestamp instanceof Date) {
+        return editForm.timestamp.toISOString().slice(0, 16);
+      }
+      // Si es string o cualquier otro formato
+      const date = new Date(editForm.timestamp);
+      if (isNaN(date.getTime())) {
+        return new Date().toISOString().slice(0, 16);
+      }
+      return date.toISOString().slice(0, 16);
+    } catch (error) {
+      console.error('Error al convertir timestamp:', error);
+      return new Date().toISOString().slice(0, 16);
     }
-    return new Date(editForm.timestamp).toISOString().slice(0, 16);
   };
 
   const handleSaveEdit = async () => {
@@ -340,11 +359,26 @@ export function Dashboard() {
   };
 
   const getTodaysServices = () => {
-    const today = new Date();
-    return services.filter((service) => {
-      const serviceDate = new Date(service.timestamp);
-      return serviceDate.toDateString() === today.toDateString();
-    });
+    try {
+      const today = new Date();
+      const filtered = services.filter((service) => {
+        try {
+          if (!service || !service.timestamp) return false;
+          const serviceDate = service.timestamp instanceof Date 
+            ? service.timestamp 
+            : new Date(service.timestamp);
+          if (isNaN(serviceDate.getTime())) return false;
+          return serviceDate.toDateString() === today.toDateString();
+        } catch (error) {
+          console.error('Error al filtrar servicio:', error, service);
+          return false;
+        }
+      });
+      return filtered;
+    } catch (error) {
+      console.error('Error en getTodaysServices:', error);
+      return [];
+    }
   };
 
 
@@ -392,7 +426,9 @@ export function Dashboard() {
     }).format(amount);
   };
 
-  const todaysServices = getTodaysServices();
+  const todaysServices = React.useMemo(() => {
+    return getTodaysServices();
+  }, [services]);
 
   if (loading) {
     return (
@@ -546,35 +582,60 @@ export function Dashboard() {
             <div className="bg-transparent rounded-xl p-4 sm:p-6 border border-gray-800">
               <h2 className="text-xl sm:text-2xl font-bold text-white mb-4 sm:mb-6 text-center">Servicios de Hoy</h2>
               <div className="max-h-96 overflow-y-auto">
+                {(() => {
+                  console.log('📊 Renderizando servicios:', {
+                    totalServices: services.length,
+                    todaysServicesCount: todaysServices.length,
+                    editingServiceId,
+                    servicesIds: services.map(s => s.id),
+                    todaysServicesIds: todaysServices.map(s => s.id),
+                  });
+                  return null;
+                })()}
                 {todaysServices.length === 0 ? (
                   <p className="text-gray-400 text-center py-8">No hay servicios registrados hoy</p>
                 ) : (
                   <div className="space-y-3">
-                    {todaysServices.map((service) => (
-                      <div key={service.id}>
-                        {editingServiceId === service.id ? (
-                          <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                            <h3 className="text-white font-semibold mb-3">Editar Servicio</h3>
-                            <div className="space-y-3">
-                              <input
-                                type="text"
-                                value={editForm.name || ''}
-                                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                                className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-white"
-                                placeholder="Nombre del servicio"
-                              />
-                              <input
-                                type="number"
-                                value={editForm.price || ''}
-                                onChange={(e) => setEditForm({ ...editForm, price: Number(e.target.value) })}
-                                className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-white"
-                                placeholder="Precio"
-                                min="0"
-                              />
+                    {todaysServices.map((service) => {
+                      if (!service || !service.id) {
+                        console.error('⚠️ Servicio inválido encontrado:', service);
+                        return null;
+                      }
+                      const isEditing = editingServiceId === service.id;
+                      return (
+                        <div key={service.id}>
+                          {isEditing ? (
+                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                              <h3 className="text-white font-semibold mb-3">Editar Servicio</h3>
+                              <div className="space-y-3">
+                                <input
+                                  type="text"
+                                  value={editForm.name ?? service.name ?? ''}
+                                  onChange={(e) => {
+                                    const newValue = e.target.value;
+                                    setEditForm((prev) => ({ ...prev, name: newValue }));
+                                  }}
+                                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-white"
+                                  placeholder="Nombre del servicio"
+                                />
+                                <input
+                                  type="number"
+                                  value={editForm.price ?? service.price ?? ''}
+                                  onChange={(e) => {
+                                    const newValue = Number(e.target.value) || 0;
+                                    setEditForm((prev) => ({ ...prev, price: newValue }));
+                                  }}
+                                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-white"
+                                  placeholder="Precio"
+                                  min="0"
+                                />
                               {barbers.length > 0 && (
                                 <select
-                                  value={editForm.barber_id || ''}
-                                  onChange={(e) => setEditForm({ ...editForm, barber_id: e.target.value })}
+                                  value={editForm.barber_id ?? service.barber_id ?? ''}
+                                  onChange={(e) => {
+                                    const newValue = e.target.value;
+                                    setEditForm((prev) => ({ ...prev, barber_id: newValue }));
+                                  }}
                                   className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-white"
                                 >
                                   <option value="">Seleccionar barbero</option>
@@ -589,11 +650,15 @@ export function Dashboard() {
                                 type="datetime-local"
                                 value={getEditFormTimestampString()}
                                 onChange={(e) => {
-                                  const newTimestamp = e.target.value ? new Date(e.target.value) : new Date();
-                                  setEditForm({ 
-                                    ...editForm, 
-                                    timestamp: newTimestamp
-                                  });
+                                  try {
+                                    const newTimestamp = e.target.value ? new Date(e.target.value) : service.timestamp;
+                                    setEditForm((prev) => ({ 
+                                      ...prev, 
+                                      timestamp: newTimestamp
+                                    }));
+                                  } catch (error) {
+                                    console.error('Error al actualizar timestamp:', error);
+                                  }
                                 }}
                                 className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-white"
                               />
@@ -617,13 +682,18 @@ export function Dashboard() {
                         ) : (
                           <div className="bg-transparent rounded-lg p-4 flex justify-between items-center border border-gray-800 group hover:bg-gray-800/30 transition-colors">
                             <div className="flex-1">
-                              <p className="text-white font-medium">{service.name}</p>
+                              <p className="text-white font-medium">{service.name || 'Sin nombre'}</p>
                               <div className="flex items-center gap-2 mt-1">
                                 <p className="text-gray-400 text-sm">
-                                  {service.timestamp.toLocaleTimeString('es-ES', {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
+                                  {service.timestamp && service.timestamp instanceof Date
+                                    ? service.timestamp.toLocaleTimeString('es-ES', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })
+                                    : new Date(service.timestamp).toLocaleTimeString('es-ES', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })}
                                 </p>
                                 {service.barber_name && (
                                   <>
@@ -636,16 +706,22 @@ export function Dashboard() {
                               </div>
                             </div>
                             <div className="flex items-center gap-3">
-                              <div className="text-white font-bold">{formatCurrency(service.price)}</div>
+                              <div className="text-white font-bold">{formatCurrency(service.price || 0)}</div>
                               <button
-                                onClick={() => handleEditService(service)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEditService(service);
+                                }}
                                 className="opacity-0 group-hover:opacity-100 p-2 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded-lg transition-all duration-200"
                                 title="Editar servicio"
                               >
                                 <Edit2 className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => deleteServiceHandler(service.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteServiceHandler(service.id);
+                                }}
                                 className="opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-all duration-200"
                                 title="Eliminar servicio"
                               >
@@ -655,7 +731,8 @@ export function Dashboard() {
                           </div>
                         )}
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
                 )}
               </div>
