@@ -110,7 +110,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const initAuth = async () => {
       try {
         console.log('🚀 Inicializando autenticación...');
-        await refreshUser();
+        
+        // Primero verificar si hay una sesión activa
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session?.user) {
+          // Si hay sesión, establecer usuario inmediatamente
+          console.log('✅ Sesión activa encontrada, estableciendo usuario...');
+          setUser({
+            id: session.user.id,
+            email: session.user.email!,
+            created_at: session.user.created_at || new Date().toISOString(),
+          });
+          
+          // Luego refrescar en segundo plano
+          refreshUser().catch(err => {
+            console.warn('⚠️ Error en refreshUser durante initAuth (no crítico):', err);
+          });
+        } else {
+          // No hay sesión, refrescar usuario (esto establecerá user como null)
+          await refreshUser();
+        }
+        
         console.log('✅ Inicialización de autenticación completada');
       } catch (error) {
         console.error('❌ Error inicializando autenticación:', error);
@@ -141,18 +162,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       try {
         if (event === 'SIGNED_IN' && session?.user) {
-          console.log('🔐 Usuario autenticado, refrescando...');
+          console.log('🔐 Usuario autenticado, estableciendo usuario...');
           setLoading(true);
-          await refreshUser();
-          console.log('✅ Refresh completado después de SIGNED_IN');
+          
+          // Establecer el usuario inmediatamente con los datos de la sesión
+          setUser({
+            id: session.user.id,
+            email: session.user.email!,
+            created_at: session.user.created_at || new Date().toISOString(),
+          });
+          
+          // Luego refrescar en segundo plano (sin bloquear)
+          refreshUser().then(() => {
+            console.log('✅ Refresh completado después de SIGNED_IN');
+          }).catch(err => {
+            console.warn('⚠️ Error en refreshUser después de SIGNED_IN (no crítico):', err);
+          });
+          
         } else if (event === 'SIGNED_OUT') {
           console.log('🚪 Usuario cerró sesión');
           setUser(null);
         } else if (event === 'TOKEN_REFRESHED') {
           // Solo refrescar si no hay usuario en el contexto
-          if (!user) {
-            console.log('🔄 Token refrescado, verificando usuario...');
-            await refreshUser();
+          if (!user && session?.user) {
+            console.log('🔄 Token refrescado, estableciendo usuario...');
+            setUser({
+              id: session.user.id,
+              email: session.user.email!,
+              created_at: session.user.created_at || new Date().toISOString(),
+            });
           }
         }
       } catch (error) {
