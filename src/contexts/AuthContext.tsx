@@ -14,11 +14,29 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<{ id: string; email: string; created_at: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const refreshUser = async () => {
+    // Prevenir llamadas duplicadas
+    if (isRefreshing) {
+      console.log('⚠️ refreshUser ya está en ejecución, omitiendo llamada duplicada');
+      return;
+    }
+
+    setIsRefreshing(true);
     try {
       console.log('🔄 refreshUser: Obteniendo usuario de Supabase Auth...');
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+      
+      // Agregar timeout a getUser
+      const getUserPromise = supabase.auth.getUser();
+      const getUserTimeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout: getUser tardó más de 5 segundos')), 5000)
+      );
+      
+      const { data: { user: authUser }, error: authError } = await Promise.race([
+        getUserPromise,
+        getUserTimeout
+      ]) as any;
       
       if (authError) {
         console.error('❌ Error obteniendo usuario de Auth:', authError);
@@ -30,13 +48,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log('✅ Usuario de Auth encontrado:', authUser.email);
         // Buscar o crear usuario en la tabla users
         console.log('🔍 Buscando usuario en DB...');
-        let dbUser = await findUserByEmail(authUser.email!);
+        
+        // Agregar timeout a findUserByEmail
+        const findUserPromise = findUserByEmail(authUser.email!);
+        const findUserTimeout = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout: findUserByEmail tardó más de 5 segundos')), 5000)
+        );
+        
+        let dbUser = await Promise.race([findUserPromise, findUserTimeout]) as any;
         
         if (!dbUser) {
           console.log('📝 Usuario no existe en DB, creando...');
           // Crear usuario en la tabla users si no existe
           try {
-            dbUser = await saveUser({ email: authUser.email! });
+            // Agregar timeout a saveUser
+            const saveUserPromise = saveUser({ email: authUser.email! });
+            const saveUserTimeout = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Timeout: saveUser tardó más de 5 segundos')), 5000)
+            );
+            
+            dbUser = await Promise.race([saveUserPromise, saveUserTimeout]) as any;
             
             if (!dbUser) {
               console.error('❌ Error al crear usuario en DB: saveUser retornó null');
@@ -57,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             email: dbUser.email,
             created_at: dbUser.created_at,
           });
-          console.log('✅ Usuario actualizado en contexto');
+          console.log('✅ Usuario actualizado en contexto - refreshUser completado');
         } else {
           console.warn('⚠️ dbUser es null después de buscar/crear');
           setUser(null);
@@ -71,6 +102,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('❌ Error refreshing user:', error);
       setUser(null);
       throw error; // Re-lanzar para que el componente pueda manejarlo
+    } finally {
+      setIsRefreshing(false);
+      console.log('✅ refreshUser finalizado (isRefreshing = false)');
     }
   };
 
@@ -78,11 +112,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Verificar sesión actual
     const initAuth = async () => {
       try {
+        console.log('🚀 Inicializando autenticación...');
         await refreshUser();
+        console.log('✅ Inicialización de autenticación completada');
       } catch (error) {
-        console.error('Error inicializando autenticación:', error);
+        console.error('❌ Error inicializando autenticación:', error);
+        setUser(null);
       } finally {
         setLoading(false);
+        console.log('✅ Loading reseteado después de initAuth');
       }
     };
     
@@ -90,17 +128,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Escuchar cambios en la autenticación
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('🔔 Auth state changed:', event);
+      console.log('🔔 Auth state changed:', event, session?.user?.email);
       try {
         if (event === 'SIGNED_IN' && session?.user) {
+          console.log('🔐 Usuario autenticado, refrescando...');
+          setLoading(true);
           await refreshUser();
+          console.log('✅ Refresh completado después de SIGNED_IN');
         } else if (event === 'SIGNED_OUT') {
+          console.log('🚪 Usuario cerró sesión');
           setUser(null);
         }
       } catch (error) {
-        console.error('Error en onAuthStateChange:', error);
+        console.error('❌ Error en onAuthStateChange:', error);
+        setUser(null);
       } finally {
         setLoading(false);
+        console.log('✅ Loading reseteado después de onAuthStateChange');
       }
     });
 
