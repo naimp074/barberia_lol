@@ -48,31 +48,31 @@ export function AuthForm({ onSuccess }: AuthFormProps) {
         }
 
         if (data.user) {
-          // Login exitoso - refrescar usuario con timeout
+          // Login exitoso - refrescar usuario
           try {
             console.log('🔄 Refrescando usuario después de login...');
-            const refreshPromise = refreshUser();
-            const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Timeout: La operación tardó más de 5 segundos')), 5000)
-            );
-            
-            await Promise.race([refreshPromise, timeoutPromise]);
+            await refreshUser();
             console.log('✅ Usuario refrescado correctamente');
             
-            // Pequeño delay para asegurar que el estado se actualice
-            setTimeout(() => {
-              onSuccess();
-            }, 100);
+            // Esperar un momento para que el estado se actualice en el contexto
+            await new Promise(resolve => setTimeout(resolve, 300));
+            
+            // Llamar onSuccess para que App.tsx maneje la navegación
+            onSuccess();
           } catch (err: any) {
             console.error('❌ Error en refreshUser:', err);
             const errorMsg = err.message || 'Error desconocido';
             
-            if (errorMsg.includes('Timeout')) {
-              setError('La operación está tardando demasiado. Por favor, recarga la página e intenta de nuevo.');
+            // Si hay un error pero el usuario está autenticado, intentar continuar
+            if (data.user) {
+              console.warn('⚠️ Error en refreshUser pero usuario autenticado, continuando...');
+              setTimeout(() => {
+                onSuccess();
+              }, 500);
             } else {
-              setError(`Error al actualizar la sesión: ${errorMsg}. Por favor, recarga la página.`);
+              setError(`Error al actualizar la sesión: ${errorMsg}. Por favor, intenta de nuevo.`);
+              setLoading(false);
             }
-            setLoading(false);
           }
         } else {
           setError('No se recibió información del usuario. Por favor, intenta de nuevo.');
@@ -103,31 +103,31 @@ export function AuthForm({ onSuccess }: AuthFormProps) {
         }
 
         if (data.user) {
-          // Registro exitoso - refrescar usuario con timeout
+          // Registro exitoso - refrescar usuario
           try {
             console.log('🔄 Refrescando usuario después de registro...');
-            const refreshPromise = refreshUser();
-            const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Timeout: La operación tardó más de 5 segundos')), 5000)
-            );
-            
-            await Promise.race([refreshPromise, timeoutPromise]);
+            await refreshUser();
             console.log('✅ Usuario refrescado correctamente');
             
-            // Pequeño delay para asegurar que el estado se actualice
-            setTimeout(() => {
-              onSuccess();
-            }, 100);
+            // Esperar un momento para que el estado se actualice en el contexto
+            await new Promise(resolve => setTimeout(resolve, 300));
+            
+            // Llamar onSuccess para que App.tsx maneje la navegación
+            onSuccess();
           } catch (err: any) {
             console.error('❌ Error en refreshUser:', err);
             const errorMsg = err.message || 'Error desconocido';
             
-            if (errorMsg.includes('Timeout')) {
-              setError('La operación está tardando demasiado. Por favor, recarga la página e intenta de nuevo.');
+            // Si hay un error pero el usuario está autenticado, intentar continuar
+            if (data.user) {
+              console.warn('⚠️ Error en refreshUser pero usuario autenticado, continuando...');
+              setTimeout(() => {
+                onSuccess();
+              }, 500);
             } else {
-              setError(`Error al actualizar la sesión: ${errorMsg}. Por favor, recarga la página.`);
+              setError(`Error al actualizar la sesión: ${errorMsg}. Por favor, intenta de nuevo.`);
+              setLoading(false);
             }
-            setLoading(false);
           }
         } else {
           setError('No se recibió información del usuario. Por favor, intenta de nuevo.');

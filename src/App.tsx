@@ -55,7 +55,7 @@ function App() {
     );
   }
 
-  if (!user) {
+  if (!user && !loading) {
     return (
       <Router>
         <Routes>
@@ -64,9 +64,10 @@ function App() {
             element={
               <AuthForm 
                 onSuccess={() => {
-                  // Forzar recarga del contexto de autenticación
-                  console.log('✅ Login exitoso, recargando página...');
-                  window.location.href = '/';
+                  // El contexto de autenticación se actualizará automáticamente
+                  // y el componente App se re-renderizará con el usuario autenticado
+                  console.log('✅ Login exitoso, esperando actualización del contexto...');
+                  // No necesitamos hacer nada más, el contexto manejará el estado
                 }} 
               />
             } 

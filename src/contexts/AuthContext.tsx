@@ -27,7 +27,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       console.log('🔄 refreshUser: Obteniendo usuario de Supabase Auth...');
       
-      // Obtener usuario de Supabase (sin timeout agresivo, Supabase ya maneja su propio timeout)
+      // Obtener usuario de Supabase
       const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
       
       if (authError) {
@@ -38,57 +38,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (authUser) {
         console.log('✅ Usuario de Auth encontrado:', authUser.email);
+        
         // Buscar o crear usuario en la tabla users
         console.log('🔍 Buscando usuario en DB...');
-        
-        // Buscar usuario en DB (con timeout más generoso)
-        const findUserPromise = findUserByEmail(authUser.email!);
-        const findUserTimeout = new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout: findUserByEmail tardó más de 10 segundos')), 10000)
-        );
-        
-        let dbUser;
-        try {
-          dbUser = await Promise.race([findUserPromise, findUserTimeout]);
-        } catch (timeoutError: any) {
-          if (timeoutError.message?.includes('Timeout')) {
-            console.warn('⚠️ Timeout en findUserByEmail, intentando continuar...');
-            // Si falla la búsqueda, intentamos crear el usuario directamente
-            dbUser = null;
-          } else {
-            throw timeoutError;
-          }
-        }
+        let dbUser = await findUserByEmail(authUser.email!);
         
         if (!dbUser) {
           console.log('📝 Usuario no existe en DB, creando...');
           // Crear usuario en la tabla users si no existe
-          try {
-            // Crear usuario en DB (con timeout más generoso)
-            const saveUserPromise = saveUser({ email: authUser.email! });
-            const saveUserTimeout = new Promise<never>((_, reject) => 
-              setTimeout(() => reject(new Error('Timeout: saveUser tardó más de 10 segundos')), 10000)
-            );
-            
-            try {
-              dbUser = await Promise.race([saveUserPromise, saveUserTimeout]);
-            } catch (timeoutError: any) {
-              if (timeoutError.message?.includes('Timeout')) {
-                console.error('❌ Timeout al crear usuario en DB');
-                throw new Error('Timeout: La creación del usuario tardó demasiado. Verifica tu conexión y permisos RLS.');
-              }
-              throw timeoutError;
-            }
-            
-            if (!dbUser) {
-              console.error('❌ Error al crear usuario en DB: saveUser retornó null');
-              throw new Error('No se pudo crear el usuario en la base de datos. Verifica los permisos RLS.');
-            }
-            console.log('✅ Usuario creado en DB:', dbUser.id);
-          } catch (saveError: any) {
-            console.error('❌ Error en saveUser:', saveError);
-            throw new Error(`Error al crear usuario: ${saveError.message || 'Error desconocido'}`);
+          dbUser = await saveUser({ email: authUser.email! });
+          
+          if (!dbUser) {
+            console.error('❌ Error al crear usuario en DB: saveUser retornó null');
+            // Si no se puede crear, usar datos del usuario de Auth directamente
+            console.warn('⚠️ Usando datos del usuario de Auth directamente');
+            setUser({
+              id: authUser.id,
+              email: authUser.email!,
+              created_at: authUser.created_at || new Date().toISOString(),
+            });
+            return;
           }
+          console.log('✅ Usuario creado en DB:', dbUser.id);
         } else {
           console.log('✅ Usuario encontrado en DB:', dbUser.id);
         }
@@ -101,18 +72,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
           console.log('✅ Usuario actualizado en contexto - refreshUser completado');
         } else {
-          console.warn('⚠️ dbUser es null después de buscar/crear');
-          setUser(null);
-          throw new Error('No se pudo obtener el usuario de la base de datos');
+          console.warn('⚠️ dbUser es null después de buscar/crear, usando Auth user');
+          setUser({
+            id: authUser.id,
+            email: authUser.email!,
+            created_at: authUser.created_at || new Date().toISOString(),
+          });
         }
       } else {
         console.log('⚠️ No hay usuario de Auth');
         setUser(null);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error refreshing user:', error);
-      setUser(null);
-      throw error; // Re-lanzar para que el componente pueda manejarlo
+      // Si hay un error pero tenemos un usuario de Auth, usar ese
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (authUser) {
+        console.warn('⚠️ Error en refreshUser pero usuario de Auth disponible, usando datos de Auth');
+        setUser({
+          id: authUser.id,
+          email: authUser.email!,
+          created_at: authUser.created_at || new Date().toISOString(),
+        });
+      } else {
+        setUser(null);
+        throw error;
+      }
     } finally {
       setIsRefreshing(false);
       console.log('✅ refreshUser finalizado (isRefreshing = false)');
@@ -123,11 +108,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let safetyTimeout: NodeJS.Timeout | null = null;
     let subscription: { unsubscribe: () => void } | null = null;
 
-    // Timeout de seguridad: siempre resetear loading después de 10 segundos máximo
+    // Timeout de seguridad: siempre resetear loading después de 15 segundos máximo
     safetyTimeout = setTimeout(() => {
-      console.warn('⚠️ Timeout de seguridad: reseteando loading después de 10 segundos');
+      console.warn('⚠️ Timeout de seguridad: reseteando loading después de 15 segundos');
       setLoading(false);
-    }, 10000);
+    }, 15000);
 
     // Verificar sesión actual
     const initAuth = async () => {
@@ -154,33 +139,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔔 Auth state changed:', event, session?.user?.email);
       
-      let changeTimeout: NodeJS.Timeout | null = null;
-      
-      // Timeout de seguridad para onAuthStateChange
-      changeTimeout = setTimeout(() => {
-        console.warn('⚠️ Timeout de seguridad en onAuthStateChange: reseteando loading');
-        setLoading(false);
-      }, 10000);
-      
       try {
         if (event === 'SIGNED_IN' && session?.user) {
           console.log('🔐 Usuario autenticado, refrescando...');
           setLoading(true);
           await refreshUser();
           console.log('✅ Refresh completado después de SIGNED_IN');
+          setLoading(false);
         } else if (event === 'SIGNED_OUT') {
           console.log('🚪 Usuario cerró sesión');
           setUser(null);
+          setLoading(false);
+        } else if (event === 'TOKEN_REFRESHED') {
+          // Solo refrescar si no hay usuario en el contexto
+          if (!user) {
+            console.log('🔄 Token refrescado, verificando usuario...');
+            await refreshUser();
+          }
+          setLoading(false);
         }
       } catch (error) {
         console.error('❌ Error en onAuthStateChange:', error);
-        setUser(null);
-      } finally {
-        if (changeTimeout) {
-          clearTimeout(changeTimeout);
-        }
+        // No establecer user como null si hay un error, puede ser temporal
         setLoading(false);
-        console.log('✅ Loading reseteado después de onAuthStateChange');
       }
     });
 
