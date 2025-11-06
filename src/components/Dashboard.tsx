@@ -70,14 +70,26 @@ export function Dashboard() {
           } else {
             // Si no hay en BD, usar los valores por defecto
             console.log('⚠️ No hay tipos de servicio en BD, usando valores por defecto');
+            setServiceTypes(defaultServiceTypes);
           }
         } catch (error) {
           console.error('Error loading service types:', error);
           // En caso de error, usar valores por defecto
+          setServiceTypes(defaultServiceTypes);
         }
       }
     };
+    
     loadServiceTypes();
+    
+    // Recargar tipos de servicio cada 10 segundos para mantener actualizados
+    const interval = setInterval(() => {
+      if (user) {
+        loadServiceTypes();
+      }
+    }, 10000); // Recargar cada 10 segundos
+
+    return () => clearInterval(interval);
   }, [user]);
 
   // Cargar barberos
@@ -111,30 +123,51 @@ export function Dashboard() {
 
   // Recargar tipos de servicio cuando la ventana vuelve a estar activa
   useEffect(() => {
-    const handleFocus = () => {
+    const handleFocus = async () => {
       if (user) {
-        const loadServiceTypes = async () => {
-          try {
-            const dbServiceTypes = await getServiceTypes(user.id);
-            if (dbServiceTypes.length > 0) {
-              const mappedTypes = dbServiceTypes.map(st => ({
-                name: st.name,
-                price: st.price,
-                icon: st.icon || '✂️',
-              }));
-              setServiceTypes(mappedTypes);
-              console.log('🔄 Tipos de servicio recargados al volver a la ventana');
-            }
-          } catch (error) {
-            console.error('Error reloading service types:', error);
+        try {
+          const dbServiceTypes = await getServiceTypes(user.id);
+          if (dbServiceTypes.length > 0) {
+            const mappedTypes = dbServiceTypes.map(st => ({
+              name: st.name,
+              price: st.price,
+              icon: st.icon || '✂️',
+            }));
+            setServiceTypes(mappedTypes);
+            console.log('🔄 Tipos de servicio recargados al volver a la ventana');
           }
-        };
-        loadServiceTypes();
+        } catch (error) {
+          console.error('Error reloading service types:', error);
+        }
+      }
+    };
+
+    const handleVisibilityChange = async () => {
+      if (!document.hidden && user) {
+        try {
+          const dbServiceTypes = await getServiceTypes(user.id);
+          if (dbServiceTypes.length > 0) {
+            const mappedTypes = dbServiceTypes.map(st => ({
+              name: st.name,
+              price: st.price,
+              icon: st.icon || '✂️',
+            }));
+            setServiceTypes(mappedTypes);
+            console.log('🔄 Tipos de servicio recargados al volver a la pestaña');
+          }
+        } catch (error) {
+          console.error('Error reloading service types:', error);
+        }
       }
     };
 
     window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [user]);
 
   const loadServices = async () => {
