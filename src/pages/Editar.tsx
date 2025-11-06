@@ -4,6 +4,7 @@ import { getServiceTypes, saveServiceType, deleteServiceType, ServiceType as Dat
 import { useAuth } from '../contexts/AuthContext';
 
 interface ServiceType {
+  id?: string;
   name: string;
   price: number;
   icon: string;
@@ -30,6 +31,7 @@ export function Editar() {
         const dbServiceTypes = await getServiceTypes(user.id);
         if (dbServiceTypes.length > 0) {
           setServiceTypes(dbServiceTypes.map(st => ({
+            id: st.id,
             name: st.name,
             price: st.price,
             icon: st.icon,
@@ -57,38 +59,71 @@ export function Editar() {
     if (!user) return;
     
     const currentService = serviceTypes[index];
-    // Buscar el ID del servicio en la base de datos
-    const dbServices = await getServiceTypes(user.id);
-    const dbService = dbServices.find(s => s.name === currentService.name && s.price === currentService.price);
     
-    if (dbService) {
-      // Actualizar servicio existente
-      await saveServiceType({
-        id: dbService.id,
-        user_id: user.id,
-        name: editForm.name,
-        price: editForm.price,
-        icon: editForm.icon,
-      });
-    } else {
-      // Crear nuevo servicio
-      await saveServiceType({
-        user_id: user.id,
-        name: editForm.name,
-        price: editForm.price,
-        icon: editForm.icon,
-      });
+    try {
+      // Si el servicio tiene ID, actualizarlo directamente
+      if (currentService.id) {
+        const updatedService = await saveServiceType({
+          id: currentService.id,
+          user_id: user.id,
+          name: editForm.name,
+          price: editForm.price,
+          icon: editForm.icon,
+        });
+        
+        if (!updatedService) {
+          alert('Error al actualizar el servicio. Por favor, intenta de nuevo.');
+          return;
+        }
+      } else {
+        // Si no tiene ID, buscar por nombre (más confiable que buscar por nombre y precio)
+        const dbServices = await getServiceTypes(user.id);
+        const dbService = dbServices.find(s => s.name === currentService.name);
+        
+        if (dbService) {
+          // Actualizar servicio existente
+          const updatedService = await saveServiceType({
+            id: dbService.id,
+            user_id: user.id,
+            name: editForm.name,
+            price: editForm.price,
+            icon: editForm.icon,
+          });
+          
+          if (!updatedService) {
+            alert('Error al actualizar el servicio. Por favor, intenta de nuevo.');
+            return;
+          }
+        } else {
+          // Crear nuevo servicio
+          const newService = await saveServiceType({
+            user_id: user.id,
+            name: editForm.name,
+            price: editForm.price,
+            icon: editForm.icon,
+          });
+          
+          if (!newService) {
+            alert('Error al crear el servicio. Por favor, intenta de nuevo.');
+            return;
+          }
+        }
+      }
+      
+      // Recargar servicios
+      const updatedServices = await getServiceTypes(user.id);
+      setServiceTypes(updatedServices.map(st => ({
+        id: st.id,
+        name: st.name,
+        price: st.price,
+        icon: st.icon,
+      })));
+      setEditingIndex(null);
+      setEditForm({ name: '', price: 0, icon: '' });
+    } catch (error: any) {
+      console.error('Error al guardar servicio:', error);
+      alert(`Error al guardar el servicio: ${error?.message || 'Error desconocido'}`);
     }
-    
-    // Recargar servicios
-    const updatedServices = await getServiceTypes(user.id);
-    setServiceTypes(updatedServices.map(st => ({
-      name: st.name,
-      price: st.price,
-      icon: st.icon,
-    })));
-    setEditingIndex(null);
-    setEditForm({ name: '', price: 0, icon: '' });
   };
 
   const handleCancel = () => {
@@ -101,18 +136,40 @@ export function Editar() {
     
     if (confirm('¿Estás seguro de que quieres eliminar este servicio?')) {
       const currentService = serviceTypes[index];
-      const dbServices = await getServiceTypes(user.id);
-      const dbService = dbServices.find(s => s.name === currentService.name && s.price === currentService.price);
       
-      if (dbService) {
-        await deleteServiceType(dbService.id, user.id);
+      try {
+        // Si tiene ID, usarlo directamente
+        if (currentService.id) {
+          const success = await deleteServiceType(currentService.id, user.id);
+          if (!success) {
+            alert('Error al eliminar el servicio. Por favor, intenta de nuevo.');
+            return;
+          }
+        } else {
+          // Si no tiene ID, buscar por nombre
+          const dbServices = await getServiceTypes(user.id);
+          const dbService = dbServices.find(s => s.name === currentService.name);
+          
+          if (dbService) {
+            const success = await deleteServiceType(dbService.id, user.id);
+            if (!success) {
+              alert('Error al eliminar el servicio. Por favor, intenta de nuevo.');
+              return;
+            }
+          }
+        }
+        
         // Recargar servicios
         const updatedServices = await getServiceTypes(user.id);
         setServiceTypes(updatedServices.map(st => ({
+          id: st.id,
           name: st.name,
           price: st.price,
           icon: st.icon,
         })));
+      } catch (error: any) {
+        console.error('Error al eliminar servicio:', error);
+        alert(`Error al eliminar el servicio: ${error?.message || 'Error desconocido'}`);
       }
     }
   };
@@ -131,6 +188,7 @@ export function Editar() {
       // Recargar servicios
       const updatedServices = await getServiceTypes(user.id);
       setServiceTypes(updatedServices.map(st => ({
+        id: st.id,
         name: st.name,
         price: st.price,
         icon: st.icon,
@@ -237,11 +295,15 @@ export function Editar() {
                   />
                   <input
                     type="number"
-                    value={editForm.price}
-                    onChange={(e) => setEditForm({ ...editForm, price: Number(e.target.value) })}
+                    value={editForm.price || ''}
+                    onChange={(e) => {
+                      const newPrice = Number(e.target.value) || 0;
+                      setEditForm({ ...editForm, price: newPrice });
+                    }}
                     className="w-full px-4 py-2 bg-white/5 border border-gray-800 rounded-lg text-white focus:outline-none focus:border-white"
                     placeholder="Precio"
                     min="0"
+                    step="100"
                   />
                   <select
                     value={editForm.icon}
