@@ -86,49 +86,69 @@ export async function saveUser(user: Partial<User>): Promise<User | null> {
   }
 
   // Usar el ID de auth.users como ID en public.users
-  const userId = authUser.id;
+  const userId = user.id || authUser.id;
+  const userEmail = user.email || authUser.email!;
 
-  if (user.id) {
-    // Actualizar usuario existente
-    const { data, error } = await supabase
-      .from('users')
-      .update({
-        email: user.email,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', user.id)
-      .select()
-      .single();
+  // Primero verificar si el usuario ya existe
+  const existingUser = await findUserByEmail(userEmail);
+  if (existingUser) {
+    console.log('✅ Usuario ya existe en public.users:', existingUser.id);
+    return existingUser;
+  }
 
-    if (error) {
-      console.error('Error updating user:', error);
-      return null;
-    }
-
-    return data;
-  } else {
-    // Crear nuevo usuario usando el ID de auth.users
-    // Esto asegura que el ID coincida con auth.uid()
+  // Intentar crear el usuario usando RPC o insert directo
+  try {
+    // Primero intentar insert directo
     const { data, error } = await supabase
       .from('users')
       .insert({
-        id: userId, // Usar el mismo ID que auth.users
-        email: user.email || authUser.email!,
+        id: userId,
+        email: userEmail,
       })
       .select()
       .single();
 
     if (error) {
-      // Si el error es porque el usuario ya existe, intentar buscarlo
-      if (error.code === '23505') { // Unique violation
-        console.log('Usuario ya existe, buscándolo...');
-        return await findUserByEmail(authUser.email!);
+      // Si el error es porque el usuario ya existe (por unique constraint en email o id)
+      if (error.code === '23505') {
+        console.log('⚠️ Usuario ya existe (unique constraint), buscándolo...');
+        const foundUser = await findUserByEmail(userEmail);
+        if (foundUser) {
+          return foundUser;
+        }
+        // Si no lo encuentra por email, intentar por ID
+        const { data: userById } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', userId)
+          .single();
+        if (userById) {
+          return userById;
+        }
       }
-      console.error('Error creating user:', error);
+      
+      // Si hay otro error, intentar con RPC function
+      console.warn('⚠️ Error en insert directo, intentando método alternativo...', error);
+      
+      // Intentar usando una función RPC si existe
+      const { data: rpcData, error: rpcError } = await supabase.rpc('create_user_if_not_exists', {
+        user_id: userId,
+        user_email: userEmail
+      }).catch(() => ({ data: null, error: { message: 'RPC function not available' } }));
+      
+      if (!rpcError && rpcData) {
+        return await findUserByEmail(userEmail);
+      }
+      
+      console.error('❌ Error creating user:', error);
       return null;
     }
 
+    console.log('✅ Usuario creado exitosamente en public.users:', data.id);
     return data;
+  } catch (err: any) {
+    console.error('❌ Error en saveUser:', err);
+    return null;
   }
 }
 
@@ -168,20 +188,29 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
   // Usar auth.uid() para cumplir con las políticas RLS
   const userId = authUser.id;
 
-  // Asegurar que el usuario existe en public.users (por si la foreign key apunta ahí)
-  // Esto es una solución temporal hasta que se ejecute el script SQL
+  // Asegurar que el usuario existe en public.users ANTES de guardar el servicio
+  // Esto es crítico si la foreign key apunta a public.users
+  let userExists = false;
   try {
     const existingUser = await findUserByEmail(authUser.email!);
-    if (!existingUser) {
-      console.log('📝 Usuario no existe en public.users, creándolo...');
-      await saveUser({ 
+    if (existingUser && existingUser.id === userId) {
+      userExists = true;
+      console.log('✅ Usuario existe en public.users:', existingUser.id);
+    } else {
+      console.log('📝 Usuario no existe en public.users o ID no coincide, creándolo...');
+      const createdUser = await saveUser({ 
         id: userId, // Usar el mismo ID que auth.users
         email: authUser.email! 
       });
-      console.log('✅ Usuario creado en public.users');
+      if (createdUser && createdUser.id === userId) {
+        userExists = true;
+        console.log('✅ Usuario creado exitosamente en public.users');
+      } else {
+        console.warn('⚠️ Usuario no se pudo crear o ID no coincide');
+      }
     }
   } catch (userError) {
-    console.warn('⚠️ Error al verificar/crear usuario en public.users (continuando):', userError);
+    console.error('❌ Error al verificar/crear usuario en public.users:', userError);
     // Continuamos de todas formas, puede que la foreign key apunte a auth.users
   }
 
@@ -239,36 +268,52 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
         timestamp: service.timestamp,
       });
       
-      // Si el error es de foreign key, intentar crear el usuario primero
+      // Si el error es de foreign key, el usuario definitivamente no existe
       if (error.code === '23503' || error.message?.includes('foreign key')) {
-        console.log('🔄 Intentando crear usuario en public.users para resolver foreign key...');
+        console.log('🔄 Error de foreign key detectado, intentando crear usuario con método forzado...');
         try {
-          await saveUser({ 
-            id: userId,
-            email: authUser.email! 
-          });
-          // Intentar insertar de nuevo
-          const retryResult = await supabase
-            .from('services')
+          // Intentar crear el usuario usando insert directo con el ID específico
+          const { error: insertUserError } = await supabase
+            .from('users')
             .insert({
-              user_id: userId,
-              name: service.name!,
-              price: service.price!,
-              barber_id: service.barber_id,
-              barber_name: service.barber_name,
-              timestamp: service.timestamp || new Date().toISOString(),
-            })
-            .select()
-            .single();
+              id: userId,
+              email: authUser.email!,
+            });
           
-          if (retryResult.error) {
-            throw retryResult.error;
+          // Si el error es que ya existe, está bien
+          if (insertUserError && insertUserError.code !== '23505') {
+            console.error('❌ Error al crear usuario:', insertUserError);
+          } else {
+            console.log('✅ Usuario creado/verificado en public.users');
+            
+            // Esperar un momento para que la transacción se complete
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Intentar insertar el servicio de nuevo
+            const retryResult = await supabase
+              .from('services')
+              .insert({
+                user_id: userId,
+                name: service.name!,
+                price: service.price!,
+                barber_id: service.barber_id,
+                barber_name: service.barber_name,
+                timestamp: service.timestamp || new Date().toISOString(),
+              })
+              .select()
+              .single();
+            
+            if (retryResult.error) {
+              console.error('❌ Error en reintento después de crear usuario:', retryResult.error);
+              throw retryResult.error;
+            }
+            
+            console.log('✅ Servicio guardado exitosamente después de crear usuario');
+            return retryResult.data;
           }
-          
-          console.log('✅ Servicio guardado después de crear usuario');
-          return retryResult.data;
         } catch (retryError: any) {
-          console.error('❌ Error en reintento:', retryError);
+          console.error('❌ Error en reintento completo:', retryError);
+          // No lanzar el error aquí, dejar que se propague el error original
         }
       }
       
