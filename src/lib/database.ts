@@ -76,6 +76,24 @@ export async function findUserByEmail(email: string): Promise<User | null> {
   return data;
 }
 
+export async function findUserById(id: string): Promise<User | null> {
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') {
+      return null; // No encontrado
+    }
+    console.error('Error finding user by ID:', error);
+    return null;
+  }
+
+  return data;
+}
+
 export async function saveUser(user: Partial<User>): Promise<User | null> {
   // Obtener el usuario autenticado de Supabase Auth
   const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -188,30 +206,96 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
   // Usar auth.uid() para cumplir con las políticas RLS
   const userId = authUser.id;
 
-  // Asegurar que el usuario existe en public.users ANTES de guardar el servicio
-  // Esto es crítico si la foreign key apunta a public.users
+  // CRÍTICO: Asegurar que el usuario existe en public.users ANTES de guardar el servicio
+  // Esto es necesario si la foreign key apunta a public.users
   let userExists = false;
-  try {
-    const existingUser = await findUserByEmail(authUser.email!);
-    if (existingUser && existingUser.id === userId) {
-      userExists = true;
-      console.log('✅ Usuario existe en public.users:', existingUser.id);
-    } else {
-      console.log('📝 Usuario no existe en public.users o ID no coincide, creándolo...');
-      const createdUser = await saveUser({ 
-        id: userId, // Usar el mismo ID que auth.users
-        email: authUser.email! 
-      });
-      if (createdUser && createdUser.id === userId) {
+  let attempts = 0;
+  const maxAttempts = 3;
+  
+  while (!userExists && attempts < maxAttempts) {
+    attempts++;
+    try {
+      // Primero verificar por ID (más directo)
+      let existingUser = await findUserById(userId);
+      
+      // Si no existe por ID, verificar por email
+      if (!existingUser) {
+        existingUser = await findUserByEmail(authUser.email!);
+      }
+      
+      if (existingUser && existingUser.id === userId) {
         userExists = true;
-        console.log('✅ Usuario creado exitosamente en public.users');
-      } else {
-        console.warn('⚠️ Usuario no se pudo crear o ID no coincide');
+        console.log('✅ Usuario existe en public.users:', existingUser.id);
+        break;
+      }
+      
+      // Si no existe o el ID no coincide, intentar crearlo
+      console.log(`📝 Intento ${attempts}/${maxAttempts}: Creando usuario en public.users...`);
+      
+      // Intentar crear con upsert usando el ID específico
+      const { data: upsertData, error: upsertError } = await supabase
+        .from('users')
+        .upsert({
+          id: userId,
+          email: authUser.email!,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'id',
+          ignoreDuplicates: false
+        })
+        .select()
+        .single();
+      
+      if (!upsertError && upsertData) {
+        if (upsertData.id === userId) {
+          userExists = true;
+          console.log('✅ Usuario creado/actualizado exitosamente en public.users:', upsertData.id);
+          break;
+        }
+      }
+      
+      // Si upsert falla, intentar insert directo
+      if (upsertError) {
+        console.log('⚠️ Upsert falló, intentando insert directo...', upsertError);
+        const { data: insertData, error: insertError } = await supabase
+          .from('users')
+          .insert({
+            id: userId,
+            email: authUser.email!,
+          })
+          .select()
+          .single();
+        
+        if (!insertError && insertData && insertData.id === userId) {
+          userExists = true;
+          console.log('✅ Usuario creado con insert directo:', insertData.id);
+          break;
+        } else if (insertError && insertError.code === '23505') {
+          // Si el error es que ya existe, verificarlo
+          const verified = await findUserById(userId);
+          if (verified && verified.id === userId) {
+            userExists = true;
+            console.log('✅ Usuario ya existía (verificado después del error):', verified.id);
+            break;
+          }
+        }
+      }
+      
+      // Esperar un momento antes de reintentar
+      if (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    } catch (userError: any) {
+      console.error(`❌ Error en intento ${attempts} de crear usuario:`, userError);
+      if (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
     }
-  } catch (userError) {
-    console.error('❌ Error al verificar/crear usuario en public.users:', userError);
-    // Continuamos de todas formas, puede que la foreign key apunte a auth.users
+  }
+  
+  if (!userExists) {
+    console.warn('⚠️ No se pudo crear/verificar usuario en public.users después de múltiples intentos');
+    console.warn('⚠️ Continuando de todas formas - puede que la foreign key apunte a auth.users');
   }
 
   if (service.id) {
@@ -270,50 +354,91 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
       
       // Si el error es de foreign key, el usuario definitivamente no existe
       if (error.code === '23503' || error.message?.includes('foreign key')) {
-        console.log('🔄 Error de foreign key detectado, intentando crear usuario con método forzado...');
+        console.log('🔄 Error de foreign key detectado, forzando creación de usuario...');
+        
+        // Intentar múltiples métodos para crear el usuario
+        let userCreated = false;
+        
+        // Método 1: Upsert
         try {
-          // Intentar crear el usuario usando insert directo con el ID específico
-          const { error: insertUserError } = await supabase
+          const { data: upsertData, error: upsertError } = await supabase
             .from('users')
-            .insert({
+            .upsert({
               id: userId,
               email: authUser.email!,
-            });
+            }, {
+              onConflict: 'id',
+              ignoreDuplicates: false
+            })
+            .select()
+            .single();
           
-          // Si el error es que ya existe, está bien
-          if (insertUserError && insertUserError.code !== '23505') {
-            console.error('❌ Error al crear usuario:', insertUserError);
-          } else {
-            console.log('✅ Usuario creado/verificado en public.users');
-            
-            // Esperar un momento para que la transacción se complete
-            await new Promise(resolve => setTimeout(resolve, 200));
-            
-            // Intentar insertar el servicio de nuevo
-            const retryResult = await supabase
-              .from('services')
+          if (!upsertError && upsertData && upsertData.id === userId) {
+            userCreated = true;
+            console.log('✅ Usuario creado con upsert en reintento');
+          }
+        } catch (e) {
+          console.warn('⚠️ Upsert falló en reintento:', e);
+        }
+        
+        // Método 2: Insert directo si upsert falló
+        if (!userCreated) {
+          try {
+            const { data: insertData, error: insertError } = await supabase
+              .from('users')
               .insert({
-                user_id: userId,
-                name: service.name!,
-                price: service.price!,
-                barber_id: service.barber_id,
-                barber_name: service.barber_name,
-                timestamp: service.timestamp || new Date().toISOString(),
+                id: userId,
+                email: authUser.email!,
               })
               .select()
               .single();
             
-            if (retryResult.error) {
-              console.error('❌ Error en reintento después de crear usuario:', retryResult.error);
-              throw retryResult.error;
+            if (!insertError && insertData && insertData.id === userId) {
+              userCreated = true;
+              console.log('✅ Usuario creado con insert en reintento');
+            } else if (insertError && insertError.code === '23505') {
+              // Ya existe, verificar
+              const verified = await findUserById(userId);
+              if (verified && verified.id === userId) {
+                userCreated = true;
+                console.log('✅ Usuario ya existía (verificado en reintento)');
+              }
             }
-            
-            console.log('✅ Servicio guardado exitosamente después de crear usuario');
-            return retryResult.data;
+          } catch (e) {
+            console.warn('⚠️ Insert directo falló en reintento:', e);
           }
-        } catch (retryError: any) {
-          console.error('❌ Error en reintento completo:', retryError);
-          // No lanzar el error aquí, dejar que se propague el error original
+        }
+        
+        // Si el usuario fue creado/verificado, intentar insertar el servicio de nuevo
+        if (userCreated) {
+          console.log('🔄 Reintentando insertar servicio después de crear usuario...');
+          
+          // Esperar un momento para que la transacción se complete
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Intentar insertar el servicio de nuevo
+          const retryResult = await supabase
+            .from('services')
+            .insert({
+              user_id: userId,
+              name: service.name!,
+              price: service.price!,
+              barber_id: service.barber_id,
+              barber_name: service.barber_name,
+              timestamp: service.timestamp || new Date().toISOString(),
+            })
+            .select()
+            .single();
+          
+          if (retryResult.error) {
+            console.error('❌ Error en reintento después de crear usuario:', retryResult.error);
+            throw new Error(`Error al guardar servicio después de crear usuario: ${retryResult.error.message}`);
+          }
+          
+          console.log('✅ Servicio guardado exitosamente después de crear usuario');
+          return retryResult.data;
+        } else {
+          throw new Error(`No se pudo crear el usuario en public.users. El user_id ${userId} no existe en la tabla users. Por favor, ejecuta el script SQL en Supabase.`);
         }
       }
       
