@@ -7,6 +7,7 @@ import {
   saveService, 
   deleteService,
   getBarbers,
+  getServiceTypes,
   Barber,
   Service as DatabaseService
 } from '../lib/database';
@@ -51,13 +52,33 @@ export function Dashboard() {
     timestamp: new Date().toISOString().slice(0, 16), // Formato datetime-local
   });
 
-  // Cargar tipos de servicio desde localStorage
+  // Cargar tipos de servicio desde la base de datos
   useEffect(() => {
-    const savedServices = localStorage.getItem('fzbarberia_service_types');
-    if (savedServices) {
-      setServiceTypes(JSON.parse(savedServices));
-    }
-  }, []);
+    const loadServiceTypes = async () => {
+      if (user) {
+        try {
+          const dbServiceTypes = await getServiceTypes(user.id);
+          if (dbServiceTypes.length > 0) {
+            // Mapear los tipos de servicio de la BD al formato esperado
+            const mappedTypes = dbServiceTypes.map(st => ({
+              name: st.name,
+              price: st.price,
+              icon: st.icon || '✂️',
+            }));
+            setServiceTypes(mappedTypes);
+            console.log('✅ Tipos de servicio cargados desde BD:', mappedTypes);
+          } else {
+            // Si no hay en BD, usar los valores por defecto
+            console.log('⚠️ No hay tipos de servicio en BD, usando valores por defecto');
+          }
+        } catch (error) {
+          console.error('Error loading service types:', error);
+          // En caso de error, usar valores por defecto
+        }
+      }
+    };
+    loadServiceTypes();
+  }, [user]);
 
   // Cargar barberos
   useEffect(() => {
@@ -87,6 +108,34 @@ export function Dashboard() {
     }, 60000);
     return () => clearInterval(timer);
   }, []);
+
+  // Recargar tipos de servicio cuando la ventana vuelve a estar activa
+  useEffect(() => {
+    const handleFocus = () => {
+      if (user) {
+        const loadServiceTypes = async () => {
+          try {
+            const dbServiceTypes = await getServiceTypes(user.id);
+            if (dbServiceTypes.length > 0) {
+              const mappedTypes = dbServiceTypes.map(st => ({
+                name: st.name,
+                price: st.price,
+                icon: st.icon || '✂️',
+              }));
+              setServiceTypes(mappedTypes);
+              console.log('🔄 Tipos de servicio recargados al volver a la ventana');
+            }
+          } catch (error) {
+            console.error('Error reloading service types:', error);
+          }
+        };
+        loadServiceTypes();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [user]);
 
   const loadServices = async () => {
     try {
