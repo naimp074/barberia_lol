@@ -158,7 +158,7 @@ export function Dashboard() {
 
       if (newService) {
         console.log('✅ Servicio guardado exitosamente:', newService);
-        // Actualizar el estado local
+        // Actualizar el estado local inmediatamente
         setServices((prev) => [
           {
             id: newService.id,
@@ -170,11 +170,10 @@ export function Dashboard() {
           },
           ...prev,
         ]);
-        // Mostrar mensaje de éxito (opcional)
-        console.log('✅ Servicio registrado correctamente');
+        console.log('✅ Servicio registrado correctamente y agregado a la lista');
       } else {
         console.error('❌ Error: saveService retornó null');
-        alert('Error al guardar el servicio. Por favor:\n\n1. Abre la consola (F12) y revisa los errores\n2. Ejecuta el script SQL en Supabase (ver archivo SOLUCION_COMPLETA.sql)\n3. Recarga la página e intenta de nuevo');
+        alert('Error al guardar el servicio. Por favor, verifica la consola (F12) para más detalles.');
       }
     } catch (error: any) {
       console.error('❌ Error adding service:', error);

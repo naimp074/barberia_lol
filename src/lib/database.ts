@@ -168,6 +168,23 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
   // Usar auth.uid() para cumplir con las políticas RLS
   const userId = authUser.id;
 
+  // Asegurar que el usuario existe en public.users (por si la foreign key apunta ahí)
+  // Esto es una solución temporal hasta que se ejecute el script SQL
+  try {
+    const existingUser = await findUserByEmail(authUser.email!);
+    if (!existingUser) {
+      console.log('📝 Usuario no existe en public.users, creándolo...');
+      await saveUser({ 
+        id: userId, // Usar el mismo ID que auth.users
+        email: authUser.email! 
+      });
+      console.log('✅ Usuario creado en public.users');
+    }
+  } catch (userError) {
+    console.warn('⚠️ Error al verificar/crear usuario en public.users (continuando):', userError);
+    // Continuamos de todas formas, puede que la foreign key apunte a auth.users
+  }
+
   if (service.id) {
     // Actualizar servicio existente
     const { data, error } = await supabase
@@ -221,6 +238,39 @@ export async function saveService(service: Partial<Service>): Promise<Service | 
         barber_id: service.barber_id,
         timestamp: service.timestamp,
       });
+      
+      // Si el error es de foreign key, intentar crear el usuario primero
+      if (error.code === '23503' || error.message?.includes('foreign key')) {
+        console.log('🔄 Intentando crear usuario en public.users para resolver foreign key...');
+        try {
+          await saveUser({ 
+            id: userId,
+            email: authUser.email! 
+          });
+          // Intentar insertar de nuevo
+          const retryResult = await supabase
+            .from('services')
+            .insert({
+              user_id: userId,
+              name: service.name!,
+              price: service.price!,
+              barber_id: service.barber_id,
+              barber_name: service.barber_name,
+              timestamp: service.timestamp || new Date().toISOString(),
+            })
+            .select()
+            .single();
+          
+          if (retryResult.error) {
+            throw retryResult.error;
+          }
+          
+          console.log('✅ Servicio guardado después de crear usuario');
+          return retryResult.data;
+        } catch (retryError: any) {
+          console.error('❌ Error en reintento:', retryError);
+        }
+      }
       
       // Lanzar el error para que el componente pueda manejarlo
       throw new Error(`Error al guardar servicio: ${error.message}`);
