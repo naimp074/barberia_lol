@@ -29,12 +29,54 @@ export function AuthForm({ onSuccess }: AuthFormProps) {
         });
 
         if (error) {
-          throw new Error(error.message || 'Error al iniciar sesión');
+          // Logging detallado para debugging
+          console.error('🔴 Auth Error (signIn):', {
+            name: error.name,
+            message: error.message,
+            status: error.status,
+          });
+          
+          let errorMessage = error.message || 'Error al iniciar sesión';
+          
+          if (error.message?.includes('Email not confirmed')) {
+            errorMessage = 'Por favor, verifica tu email antes de iniciar sesión.';
+          } else if (error.message?.includes('Invalid login credentials')) {
+            errorMessage = 'Email o contraseña incorrectos.';
+          }
+          
+          throw new Error(errorMessage);
         }
 
         if (data.user) {
-          await refreshUser();
-          onSuccess();
+          // Login exitoso - refrescar usuario con timeout
+          try {
+            console.log('🔄 Refrescando usuario después de login...');
+            const refreshPromise = refreshUser();
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Timeout: La operación tardó más de 5 segundos')), 5000)
+            );
+            
+            await Promise.race([refreshPromise, timeoutPromise]);
+            console.log('✅ Usuario refrescado correctamente');
+            
+            // Pequeño delay para asegurar que el estado se actualice
+            setTimeout(() => {
+              onSuccess();
+            }, 100);
+          } catch (err: any) {
+            console.error('❌ Error en refreshUser:', err);
+            const errorMsg = err.message || 'Error desconocido';
+            
+            if (errorMsg.includes('Timeout')) {
+              setError('La operación está tardando demasiado. Por favor, recarga la página e intenta de nuevo.');
+            } else {
+              setError(`Error al actualizar la sesión: ${errorMsg}. Por favor, recarga la página.`);
+            }
+            setLoading(false);
+          }
+        } else {
+          setError('No se recibió información del usuario. Por favor, intenta de nuevo.');
+          setLoading(false);
         }
       } else {
         // Registrarse con Supabase Auth
@@ -44,12 +86,52 @@ export function AuthForm({ onSuccess }: AuthFormProps) {
         });
 
         if (error) {
-          throw new Error(error.message || 'Error al registrarse');
+          // Logging detallado para debugging
+          console.error('🔴 Auth Error (signUp):', {
+            name: error.name,
+            message: error.message,
+            status: error.status,
+          });
+          
+          let errorMessage = error.message || 'Error al registrarse';
+          
+          if (error.message?.includes('already registered')) {
+            errorMessage = 'Este email ya está registrado. Inicia sesión en su lugar.';
+          }
+          
+          throw new Error(errorMessage);
         }
 
         if (data.user) {
-          await refreshUser();
-          onSuccess();
+          // Registro exitoso - refrescar usuario con timeout
+          try {
+            console.log('🔄 Refrescando usuario después de registro...');
+            const refreshPromise = refreshUser();
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Timeout: La operación tardó más de 5 segundos')), 5000)
+            );
+            
+            await Promise.race([refreshPromise, timeoutPromise]);
+            console.log('✅ Usuario refrescado correctamente');
+            
+            // Pequeño delay para asegurar que el estado se actualice
+            setTimeout(() => {
+              onSuccess();
+            }, 100);
+          } catch (err: any) {
+            console.error('❌ Error en refreshUser:', err);
+            const errorMsg = err.message || 'Error desconocido';
+            
+            if (errorMsg.includes('Timeout')) {
+              setError('La operación está tardando demasiado. Por favor, recarga la página e intenta de nuevo.');
+            } else {
+              setError(`Error al actualizar la sesión: ${errorMsg}. Por favor, recarga la página.`);
+            }
+            setLoading(false);
+          }
+        } else {
+          setError('No se recibió información del usuario. Por favor, intenta de nuevo.');
+          setLoading(false);
         }
       }
     } catch (err: any) {
@@ -144,6 +226,19 @@ export function AuthForm({ onSuccess }: AuthFormProps) {
             >
               {loading ? 'Procesando...' : isLogin ? 'Iniciar Sesión' : 'Crear Cuenta'}
             </button>
+            
+            {loading && (
+              <button
+                type="button"
+                onClick={() => {
+                  setLoading(false);
+                  setError('Operación cancelada. Por favor, intenta de nuevo.');
+                }}
+                className="w-full mt-2 py-2 px-4 bg-gray-700 text-white text-sm rounded-lg hover:bg-gray-600 transition-colors"
+              >
+                Cancelar
+              </button>
+            )}
           </form>
         </div>
 

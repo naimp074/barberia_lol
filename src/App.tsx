@@ -41,7 +41,18 @@ function App() {
     return (
       <Router>
         <Routes>
-          <Route path="/login" element={<AuthForm onSuccess={() => {}} />} />
+          <Route 
+            path="/login" 
+            element={
+              <AuthForm 
+                onSuccess={() => {
+                  // Forzar recarga del contexto de autenticación
+                  console.log('✅ Login exitoso, recargando página...');
+                  window.location.href = '/';
+                }} 
+              />
+            } 
+          />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Router>
