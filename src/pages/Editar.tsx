@@ -62,14 +62,80 @@ export function Editar() {
   useEffect(() => {
     const loadServiceTypes = async () => {
       if (user) {
-        const dbServiceTypes = await getServiceTypes(user.id);
-        if (dbServiceTypes.length > 0) {
-          setServiceTypes(dbServiceTypes.map(st => ({
-            id: st.id,
-            name: st.name,
-            price: st.price,
-            icon: st.icon,
-          })));
+        try {
+          const dbServiceTypes = await getServiceTypes(user.id);
+          if (dbServiceTypes.length > 0) {
+            // Si hay tipos en BD, usarlos
+            setServiceTypes(dbServiceTypes.map(st => ({
+              id: st.id,
+              name: st.name,
+              price: st.price,
+              icon: st.icon,
+            })));
+            console.log('✅ Tipos de servicio cargados desde BD:', dbServiceTypes.length);
+          } else {
+            // Si no hay en BD, crear los tipos por defecto
+            console.log('📝 No hay tipos de servicio en BD, creando tipos por defecto...');
+            const defaultTypesToCreate = [
+              { name: 'Corte', price: 6500, icon: '✂️' },
+              { name: 'Corte y perfilado', price: 7000, icon: '✂️✨' },
+              { name: 'Corte y barba', price: 7500, icon: '✂️🧔' },
+              { name: 'Corte barba y perfilado', price: 8000, icon: '✂️🧔✨' },
+              { name: 'Barba', price: 3000, icon: '🧔' },
+            ];
+            
+            const createdTypes = [];
+            for (const type of defaultTypesToCreate) {
+              try {
+                const created = await saveServiceType({
+                  user_id: user.id,
+                  name: type.name,
+                  price: type.price,
+                  icon: type.icon,
+                });
+                if (created) {
+                  createdTypes.push({
+                    id: created.id,
+                    name: created.name,
+                    price: created.price,
+                    icon: created.icon,
+                  });
+                }
+              } catch (error) {
+                console.error(`Error creando tipo ${type.name}:`, error);
+              }
+            }
+            
+            if (createdTypes.length > 0) {
+              setServiceTypes(createdTypes);
+              console.log('✅ Tipos de servicio por defecto creados:', createdTypes.length);
+            } else {
+              // Si no se pudieron crear, usar los valores por defecto sin ID
+              setServiceTypes(defaultTypesToCreate.map(t => ({ ...t, id: undefined })));
+            }
+          }
+        } catch (error: any) {
+          console.error('Error loading service types:', error);
+          const errorMessage = error?.message || 'Error desconocido';
+          
+          // Si la tabla no existe, mostrar mensaje pero aún así permitir usar valores por defecto
+          if (errorMessage.includes('does not exist') || errorMessage.includes('relation') || errorMessage.includes('service_types')) {
+            console.warn('⚠️ La tabla service_types no existe. Ejecuta el script CREAR_TABLA_SERVICE_TYPES.sql en Supabase.');
+            // Mostrar alerta solo una vez
+            if (!localStorage.getItem('service_types_table_warning_shown')) {
+              alert('⚠️ La tabla "service_types" no existe en Supabase.\n\nPara poder editar precios, ejecuta el script SQL:\n\n1. Ve a Supabase Dashboard → SQL Editor\n2. Abre CREAR_TABLA_SERVICE_TYPES.sql\n3. Copia y pega TODO el contenido\n4. Ejecuta (Run)\n5. Recarga la aplicación\n\nMientras tanto, puedes usar los valores por defecto.');
+              localStorage.setItem('service_types_table_warning_shown', 'true');
+            }
+          }
+          
+          // En caso de error, usar valores por defecto
+          setServiceTypes([
+            { name: 'Corte', price: 6500, icon: '✂️' },
+            { name: 'Corte y perfilado', price: 7000, icon: '✂️✨' },
+            { name: 'Corte y barba', price: 7500, icon: '✂️🧔' },
+            { name: 'Corte barba y perfilado', price: 8000, icon: '✂️🧔✨' },
+            { name: 'Barba', price: 3000, icon: '🧔' },
+          ]);
         }
       }
     };
@@ -207,7 +273,7 @@ export function Editar() {
           }
           console.log('✅ Servicio actualizado exitosamente:', updatedService);
         } else {
-          console.log('📝 Servicio no encontrado, creando nuevo');
+          console.log('📝 Servicio no encontrado en BD, creando nuevo');
           // Crear nuevo servicio
           updatedService = await saveServiceType({
             user_id: user.id,
@@ -218,8 +284,31 @@ export function Editar() {
           
           if (!updatedService) {
             console.error('❌ Error: saveServiceType retornó null al crear nuevo servicio');
-            alert('Error al crear el servicio. Por favor, verifica la consola (F12) para más detalles.');
-            return;
+            // Intentar crear con el nombre original si el nuevo nombre no funcionó
+            if (editForm.name.trim() !== currentService.name) {
+              console.log('🔄 Intentando crear con nombre original...');
+              const retryService = await saveServiceType({
+                user_id: user.id,
+                name: currentService.name,
+                price: editForm.price,
+                icon: editForm.icon || '✂️',
+              });
+              if (retryService) {
+                // Si se creó con el nombre original, actualizarlo con el nuevo nombre
+                updatedService = await saveServiceType({
+                  id: retryService.id,
+                  user_id: user.id,
+                  name: editForm.name.trim(),
+                  price: editForm.price,
+                  icon: editForm.icon || '✂️',
+                });
+              }
+            }
+            
+            if (!updatedService) {
+              alert('Error al crear el servicio. Por favor, verifica la consola (F12) para más detalles.\n\nAsegúrate de que la tabla service_types existe en Supabase.');
+              return;
+            }
           }
           console.log('✅ Nuevo servicio creado exitosamente:', updatedService);
         }
@@ -227,30 +316,47 @@ export function Editar() {
       
       // Recargar servicios desde la base de datos
       console.log('🔄 Recargando servicios desde la base de datos...');
-      const updatedServices = await getServiceTypes(user.id);
-      console.log('📋 Servicios recargados:', updatedServices);
-      
-      if (updatedServices.length > 0) {
-        setServiceTypes(updatedServices.map(st => ({
-          id: st.id,
-          name: st.name,
-          price: st.price,
-          icon: st.icon,
-        })));
-        console.log('✅ Estado actualizado con servicios de la BD');
-      } else {
-        // Si no hay servicios en BD, mantener los locales pero actualizar el editado
-        setServiceTypes(prev => prev.map((st, idx) => 
-          idx === index 
-            ? { id: updatedService?.id, name: editForm.name.trim(), price: editForm.price, icon: editForm.icon || '✂️' }
-            : st
-        ));
-        console.log('⚠️ No hay servicios en BD, actualizando estado local');
+      try {
+        const updatedServices = await getServiceTypes(user.id);
+        console.log('📋 Servicios recargados:', updatedServices);
+        
+        if (updatedServices.length > 0) {
+          setServiceTypes(updatedServices.map(st => ({
+            id: st.id,
+            name: st.name,
+            price: st.price,
+            icon: st.icon,
+          })));
+          console.log('✅ Estado actualizado con servicios de la BD');
+        } else {
+          // Si no hay servicios en BD pero se actualizó exitosamente, actualizar el estado local
+          if (updatedService) {
+            setServiceTypes(prev => prev.map((st, idx) => 
+              idx === index 
+                ? { id: updatedService.id, name: editForm.name.trim(), price: editForm.price, icon: editForm.icon || '✂️' }
+                : st
+            ));
+            console.log('⚠️ No hay servicios en BD, pero se actualizó el estado local');
+          }
+        }
+      } catch (reloadError) {
+        console.error('Error al recargar servicios:', reloadError);
+        // Si falla la recarga, al menos actualizar el estado local con los datos guardados
+        if (updatedService) {
+          setServiceTypes(prev => prev.map((st, idx) => 
+            idx === index 
+              ? { id: updatedService.id, name: editForm.name.trim(), price: editForm.price, icon: editForm.icon || '✂️' }
+              : st
+          ));
+        }
       }
       
       setEditingIndex(null);
       setEditForm({ name: '', price: 0, icon: '' });
       console.log('✅ Edición completada exitosamente');
+      
+      // Mostrar mensaje de éxito
+      alert(`✅ Servicio "${editForm.name.trim()}" actualizado exitosamente.\n\nPrecio: ${formatCurrency(editForm.price)}`);
     } catch (error: any) {
       console.error('❌ Error al guardar servicio:', error);
       console.error('Detalles del error:', {
@@ -258,7 +364,16 @@ export function Editar() {
         stack: error?.stack,
         code: error?.code,
       });
-      alert(`Error al guardar el servicio:\n\n${error?.message || 'Error desconocido'}\n\nPor favor, verifica la consola (F12) para más detalles.`);
+      
+      const errorMessage = error?.message || 'Error desconocido';
+      let alertMessage = `Error al guardar el servicio:\n\n${errorMessage}`;
+      
+      // Mensaje específico si la tabla no existe
+      if (errorMessage.includes('does not exist') || errorMessage.includes('relation') || errorMessage.includes('service_types')) {
+        alertMessage += '\n\n⚠️ IMPORTANTE:\n\nLa tabla "service_types" no existe en Supabase.\n\nSOLUCIÓN:\n\n1. Ve a Supabase Dashboard → SQL Editor\n2. Abre el archivo CREAR_TABLA_SERVICE_TYPES.sql\n3. Copia TODO el contenido\n4. Pégalo en SQL Editor y ejecuta (Run)\n5. Recarga la aplicación y prueba de nuevo';
+      }
+      
+      alert(alertMessage);
     }
   };
 
